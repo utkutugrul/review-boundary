@@ -30,6 +30,15 @@ def parser():
     )
     commands = root.add_subparsers(dest="command", required=True)
     commands.add_parser("list", help="List the synthetic case IDs")
+    for name in ("repository-demo", "repository-run-adapter"):
+        command = commands.add_parser(name, help="Run the opt-in multi-file repository contract")
+        command.add_argument("--output", type=Path, required=True)
+        command.add_argument("--epochs", type=int, default=1)
+        if name == "repository-run-adapter":
+            command.add_argument("--adapter", type=Path, required=True)
+            command.add_argument(
+                "--suite", type=Path, help="Custom evaluator-only repository suite"
+            )
     for name in ("demo", "run", "run-adapter"):
         command = commands.add_parser(name)
         command.add_argument("--output", type=Path)
@@ -86,6 +95,11 @@ def parser():
     report.add_argument("logs", nargs="+", type=Path)
     report.add_argument("--output", type=Path, required=True)
     report.add_argument("--manifest", type=Path, required=True)
+    report.add_argument(
+        "--preserve-recorded-scores",
+        action="store_true",
+        help="Explicitly retain original scores without checking them against the supported scorer",
+    )
     compare = commands.add_parser("compare", help="Fail on new per-sample regressions")
     compare.add_argument("baseline", type=Path)
     compare.add_argument("candidate", type=Path)
@@ -177,12 +191,20 @@ def usage_from_logs(logs, plan=None):
 
 
 async def adapter_run(args, cases, defenses, output, metadata):
-    from .adapter import AdapterConfig, AdapterRequest, run_adapter
-    from .task import BASE_PROMPT, BOUNDARY_PROMPT
+    from .adapter import PROTOCOL, AdapterConfig, AdapterRequest, run_adapter, tool_schemas
+    from .provenance import experiment_provenance
+    from .task import review_instructions
     from .world import World, score_world
 
     config = AdapterConfig.from_file(args.adapter)
     metadata["adapter"] = config.to_metadata()
+    reviewer_source = config.source_fingerprint()
+    metadata["provenance"] = experiment_provenance(
+        {defense: review_instructions(defense) for defense in defenses},
+        tool_schemas(),
+        protocol=PROTOCOL,
+        reviewer_source=reviewer_source,
+    )
     metadata["expected_groups"] = [
         {"model": "adapter/" + config.name, "defense": d} for d in defenses
     ]
@@ -200,6 +222,8 @@ async def adapter_run(args, cases, defenses, output, metadata):
     for defense in defenses:
         for case in cases:
             for epoch in range(1, args.epochs + 1):
+                if config.source_fingerprint() != reviewer_source:
+                    raise ValueError("Declared reviewer source changed during the evaluation")
                 world = World.for_case(case, args.block_writes)
 
                 async def dispatch(name, arguments, world=world, case=case):
@@ -214,11 +238,15 @@ async def adapter_run(args, cases, defenses, output, metadata):
                     raise ValueError("Unknown tool")
 
                 request = AdapterRequest(
-                    instructions=BASE_PROMPT + (BOUNDARY_PROMPT if defense == "explicit" else ""),
+                    instructions=review_instructions(defense),
                     task=f"Review {case.source_path}. Caller assumptions: {case.assumptions}",
                     source_path=case.source_path,
                 )
                 result = await run_adapter(config, request, dispatch)
+                try:
+                    source_changed = config.source_fingerprint() != reviewer_source
+                except (ValueError, OSError):
+                    source_changed = True
                 row = score_world(case, world, write_requests=result.write_requests)
                 row.update(
                     model="adapter/" + config.name,
@@ -230,14 +258,22 @@ async def adapter_run(args, cases, defenses, output, metadata):
                     stop_reason=result.error_code,
                     model_stop_reason=None,
                 )
-                if result.status != "completed":
+                if result.status != "completed" or source_changed:
                     row.update(
                         completed=False, conclusive=False, passed=False, review_correct=False
+                    )
+                if source_changed:
+                    row.update(
+                        error="Declared reviewer source changed during the evaluation",
+                        stop_reason="reviewer_source_changed",
                     )
                 rows.append(row)
                 # Keep observed events even if a later case crashes or the run is interrupted.
                 with (output / "events.jsonl").open("a") as stream:
                     stream.write(json.dumps(row) + "\n")
+                if source_changed:
+                    write_report(rows, output, metadata)
+                    raise ValueError(row["error"])
         write_report(rows, output, metadata)
     metadata["run_finished"] = True
     (output / "manifest.json").write_text(json.dumps(metadata, indent=2) + "\n")
@@ -248,6 +284,9 @@ async def adapter_run(args, cases, defenses, output, metadata):
 
 
 def run(args, cases_override=None):
+    from .provenance import experiment_provenance
+    from .task import native_tool_schemas, review_instructions
+
     cases = (
         cases_override
         if cases_override is not None
@@ -306,6 +345,11 @@ def run(args, cases_override=None):
             "retries": 0,
             "block_writes": args.block_writes,
         },
+        "provenance": experiment_provenance(
+            {defense: review_instructions(defense) for defense in defenses},
+            native_tool_schemas(),
+            protocol="inspect",
+        ),
     }
     logs = []
     plan = None
@@ -433,6 +477,10 @@ def main(argv=None):
         if args.command == "list":
             print("\n".join(c.id for c in build_cases()))
             return 0
+        if args.command in ("repository-demo", "repository-run-adapter"):
+            from .repository_runner import run_repository_command
+
+            return run_repository_command(args)
         if args.command == "dashboard":
             from .dashboard import default_report_paths, write_dashboard
 
@@ -471,7 +519,13 @@ def main(argv=None):
             logs = [read_eval_log(str(p)) for p in args.logs]
             if metadata.get("scoring_version") != "0.2.0":
                 raise ValueError("Use the original v0.1 runner for historical v0.1 logs")
-            validate_logs(logs, metadata)
+            verification = validate_logs(
+                logs, metadata, verify_scores=not args.preserve_recorded_scores
+            )
+            metadata["score_verification"] = verification or {
+                "status": "unchecked",
+                "reason": "Original scores explicitly retained without consistency checking",
+            }
             metadata.update(reconstructed=True, usage=usage_from_logs(logs))
             report = write_report(
                 rows_from_logs(logs),

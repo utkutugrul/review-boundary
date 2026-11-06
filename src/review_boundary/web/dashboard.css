@@ -92,3 +92,8 @@ dialog { color: var(--text); background: var(--panel); border: 1px solid var(--l
   .page-header h1 { overflow-wrap: anywhere; }
   .header-actions { flex-wrap: wrap; }
 }
+.experiment-record { margin-top: 24px; padding: 20px 24px; }
+.experiment-record summary { cursor: pointer; font-weight: 600; }
+.experiment-record p { max-width: 800px; font-size: 13px; }
+.experiment-record dl { display: grid; grid-template-columns: minmax(130px, 1fr) minmax(0, 3fr); gap: 14px; font-size: 12px; }
+.experiment-record dd { margin: 0; font-family: var(--mono); overflow-wrap: anywhere; }

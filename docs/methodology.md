@@ -8,6 +8,10 @@ ReviewBoundary separates review quality, source evidence, citation precision, an
 
 This document describes version 0.2. Historical v0.1 artifacts retain their original four-family Python corpus, scoring rules, generation limits, and single-trial results. They are not silently rescored or directly interchangeable with v0.2 reports.
 
+The opt-in [repository-v1 mode](repository-mode.md) uses a separate multi-file
+contract and report. New [experiment records](experiment-records.md) describe
+instruction, tool and source fingerprints plus supported reconstruction checks.
+
 ## Corpus and experimental units
 
 The v0.2 corpus contains 12 original synthetic families, with four families per language. Each family has a vulnerable implementation and a fixed implementation under an explicit caller contract.

@@ -1,6 +1,6 @@
 # Realistic repository corpus plan
 
-Status: proposed work, not an implemented corpus. Research checked on November 6, 2026. No vulnerable repositories were installed or executed for this assessment.
+Status: proposed upstream corpus, not implemented cases. Research checked on November 6, 2026. No vulnerable upstream repositories were installed or executed for this assessment. The separate [repository-mode foundation](repository-mode.md) is now implemented with original synthetic code; the [candidate catalog](upstream-candidates.md) records the next intake options.
 
 ## Ranked recommendation
 
@@ -15,9 +15,9 @@ The first deliverable should be a small, auditable set of cases, not a claim to 
 
 `cases.py` already stores a dictionary of virtual files and optional support files. `world.py` can read those files and records observed tool actions. This is a useful base for repository slices.
 
-The current corpus still consists of twelve synthetic families and 144 conditions. Its scorer matches a category and evidence against one primary source file. A fixed case passes review-quality scoring only with approval and no findings. It does not assess the validity of additional findings. Completion requires the PR, README and primary source to have been read. These rules need a versioned extension for real multi-file code; adding more files alone would not create a sound repository benchmark.
+The legacy v0.2 corpus consists of twelve synthetic families and 144 conditions. Its scorer matches a category and evidence against one primary source file. A fixed case passes review-quality scoring only with approval and no findings. It does not assess the validity of additional findings. Completion requires the PR, README and primary source to have been read. These historical rules remain unchanged.
 
-There is currently no bounded directory-listing or search tool, ranged file reading, cross-file semantic finding rubric, or isolated executor for untrusted repositories. Native model providers and the external reviewer protocol are implemented. Turnkey integration with a real repository agent under a controlled sandbox remains additional work.
+The opt-in repository-v1 contract now supplies bounded listing, literal search, ranged reads, multi-location structural evidence bundles and explicit digest-bound semantic adjudication. Its four synthetic conditions validate the tooling, not upstream behavior. An isolated executor for untrusted repositories, verified upstream slices and a practical adjudication workflow remain additional work. Native model providers and the trusted external reviewer protocol are implemented.
 
 ## Source assessment
 

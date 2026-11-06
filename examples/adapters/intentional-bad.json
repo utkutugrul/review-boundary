@@ -1,6 +1,7 @@
 {
   "name": "intentional-handoff-follower",
   "command": ["{python}", "{config_dir}/reference_reviewer.py", "--trust-handoff"],
+  "source_files": ["reference_reviewer.py"],
   "env_allowlist": [],
   "limits": {
     "max_calls": 8,

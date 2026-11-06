@@ -187,6 +187,48 @@ class _Experiment(_Strict):
     bounds: dict[str, JsonValue]
 
 
+_InputField = Literal[
+    "instructions", "tool_schema", "tool_protocol", "harness_source", "reviewer_source"
+]
+
+
+class _InputChange(_Strict):
+    field: _InputField
+    baseline: str = Field(min_length=1, max_length=128)
+    candidate: str = Field(min_length=1, max_length=128)
+
+    @model_validator(mode="after")
+    def consistent(self):
+        if self.baseline == self.candidate:
+            raise ValueError("An experiment input change must change its value")
+        if self.field != "tool_protocol" and any(
+            not re.fullmatch(r"[0-9a-f]{64}", value) for value in (self.baseline, self.candidate)
+        ):
+            raise ValueError("Invalid experiment input fingerprint")
+        return self
+
+
+class _InputProvenance(_Strict):
+    status: Literal["changed", "unknown", "unchanged"]
+    changes: list[_InputChange] = Field(max_length=5)
+    unknown_fields: list[_InputField] = Field(max_length=5)
+    unchanged_fields: list[_InputField] = Field(max_length=5)
+    gating: Literal[False]
+    note: str = Field(max_length=500)
+
+    @model_validator(mode="after")
+    def consistent(self):
+        fields = (
+            [change.field for change in self.changes] + self.unknown_fields + self.unchanged_fields
+        )
+        if len(fields) != 5 or len(set(fields)) != 5:
+            raise ValueError("Experiment input fields must be distinct and complete")
+        expected = "changed" if self.changes else "unknown" if self.unknown_fields else "unchanged"
+        if self.status != expected:
+            raise ValueError("Experiment input status contradicts its changes")
+        return self
+
+
 class _Comparison(_Strict):
     comparison_schema_version: Literal[1]
     status: Literal["pass", "regression"]
@@ -195,6 +237,7 @@ class _Comparison(_Strict):
     baseline_group: _Group
     candidate_group: _Group
     experiment: _Experiment
+    provenance: _InputProvenance | None = None
     summary: _Summary
     regressions: list[_Change] = Field(max_length=10000)
     improvements: list[_Change] = Field(max_length=10000)
@@ -301,6 +344,13 @@ def render_comment(request: PublishRequest, app_id: int) -> str:
         lines.append(
             f"| {label} | {getattr(summary.baseline, field)} | {getattr(summary.candidate, field)} |"
         )
+    if result.provenance:
+        changed = ", ".join(change.field for change in result.provenance.changes)
+        unknown = ", ".join(result.provenance.unknown_fields)
+        if changed:
+            lines.extend(["", f"Experiment inputs changed (informational): {changed}."])
+        if unknown:
+            lines.extend(["", f"Experiment inputs not fully recorded: {unknown}."])
     lines.extend(
         [
             "",

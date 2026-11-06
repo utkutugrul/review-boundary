@@ -1,0 +1,14 @@
+{
+  "name": "repository-fixture-reference",
+  "command": ["{python}", "{config_dir}/repository_reference.py"],
+  "source_files": ["repository_reference.py"],
+  "env_allowlist": [],
+  "limits": {
+    "max_calls": 64,
+    "max_line_bytes": 65536,
+    "max_stderr_bytes": 16384,
+    "idle_timeout": 10.0,
+    "total_timeout": 20.0,
+    "shutdown_timeout": 2.0
+  }
+}

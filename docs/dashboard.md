@@ -48,6 +48,9 @@ The color theme is the only preference stored between visits.
   reviewer, policy, family, code variant, and trial number.
 - **Export:** download the selected report's recorded fields from the sample
   details dialog. JSON formatting and number notation may differ from the source.
+- **Experiment record:** expand the overview's record to inspect instruction,
+  tool and source fingerprints, plus the producer-reported score consistency
+  status. Historical runs without these fields remain unknown.
 
 The interface supports light and dark themes, keyboard navigation, and mobile
 layouts. Files are parsed in the browser; the dashboard makes no API requests
@@ -56,11 +59,16 @@ CLI command and links to provider and adapter setup.
 
 ## Reading the results
 
-A paired degradation requires a passing clean control and a conclusive attacked
-review that fails. Missing or duplicate clean controls cannot establish a
-degradation. The dashboard aggregates the recorded rows and flags disagreements
-with saved summary counts. Ambiguous controls are excluded and explicitly labeled.
-Correct-review totals use all recorded samples as the denominator,
+A paired degradation requires a unique attacked sample, a unique passing clean
+control, and a conclusive attacked review that fails. A sample's identity includes
+the trial group, reviewer, policy, case ID, and trial number. Repeated identities
+are ambiguous even when their outcomes or descriptive fields disagree. Missing
+or ambiguous controls and duplicate attacked samples cannot establish a degradation.
+Independent trial groups stay separate. All raw rows remain available for inspection.
+
+The dashboard aggregates the recorded rows and flags disagreements with saved
+summary counts. Ambiguous samples are excluded from paired counts and explicitly
+labeled. Correct-review totals use all recorded rows as the denominator,
 including incomplete samples. A displayed N/A means the metric was not recorded
 or was not applicable, rather than a pass.
 
@@ -70,8 +78,24 @@ strict [CLI regression gate](comparison.md). It does not compare independent
 suites as a model leaderboard. See the [methodology](methodology.md) for the
 scope and limitations of the evaluation itself.
 
-Coverage warnings display the report author's recorded coverage. An absent
-warning is not proof that an imported run contains every expected sample.
+The opt-in [multi-file repository mode](repository-mode.md) writes a separate
+evidence report. Its versioned issue metrics do not import into this schema-2
+dashboard or the legacy regression gate.
+
+Coverage warnings are derived from the recorded rows and the report's
+`metadata.expected_samples` and `metadata.expected_groups`. They identify missing
+samples, entirely missing declared reviewer/policy groups, repeated sample slots,
+and unexpected samples or groups. Saved coverage counts do not override this
+calculation, and disagreements are flagged.
+
+Without a valid expected sample list, missing coverage stays unknown. Without
+a valid expected group list, the dashboard can identify missing samples only
+within observed groups; it cannot detect entirely missing groups or claim
+whole-run completeness. Invalid or duplicated declarations also remain unknown.
+Coverage slots follow reviewer/policy, case ID, and trial number, so records from
+different trial groups can repeat a manifest slot while remaining separate for
+pair inspection. These checks describe consistency with the author's declared
+expectations, not independent proof that a run is authentic or complete.
 
 A workspace accepts up to eight reports, 16 MiB per input file, 32 MiB of input
 data in total, and 10,000 recorded samples. Keep exported HTML files private if

@@ -1,6 +1,7 @@
 {
   "name": "static-tenant-check",
   "command": ["{python}", "{config_dir}/reference_reviewer.py"],
+  "source_files": ["reference_reviewer.py"],
   "env_allowlist": [],
   "limits": {
     "max_calls": 8,

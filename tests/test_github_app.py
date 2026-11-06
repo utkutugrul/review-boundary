@@ -194,6 +194,48 @@ def test_repeat_is_idempotent_and_updates_only_own_comment(config, request_data)
     assert unchanged.action == "unchanged" and not api.mutations
 
 
+def test_provenance_rendering_is_informational_and_legacy_artifacts_remain_valid(request_data):
+    result = deepcopy(request_data.comparison)
+    result.pop("provenance", None)
+    assert "NO NEW REGRESSIONS" in render_comment(replace(request_data, comparison=result), 123)
+    result["provenance"] = {
+        "status": "changed",
+        "changes": [{"field": "instructions", "baseline": "a" * 64, "candidate": "b" * 64}],
+        "unknown_fields": ["tool_schema", "tool_protocol", "harness_source", "reviewer_source"],
+        "unchanged_fields": [],
+        "gating": False,
+        "note": "@everyone <script>untrusted metadata</script>",
+    }
+    body = render_comment(replace(request_data, comparison=result), 123)
+    assert "NO NEW REGRESSIONS" in body and "changed (informational): instructions" in body
+    assert "not fully recorded: tool_schema" in body
+    assert "@everyone" not in body and "<script>" not in body
+
+
+@pytest.mark.parametrize("problem", ["gating", "duplicate", "missing", "status", "digest", "field"])
+def test_malformed_provenance_summary_cannot_be_published(request_data, problem):
+    result = deepcopy(request_data.comparison)
+    provenance = result["provenance"]
+    if problem == "gating":
+        provenance["gating"] = True
+    elif problem == "duplicate":
+        provenance["unknown_fields"][0] = provenance["unknown_fields"][1]
+    elif problem == "missing":
+        provenance["unknown_fields"].pop()
+    elif problem == "status":
+        provenance["status"] = "unchanged"
+    elif problem == "field":
+        provenance["unknown_fields"][0] = "@everyone"
+    else:
+        provenance["status"] = "changed"
+        provenance["unknown_fields"].remove("instructions")
+        provenance["changes"] = [
+            {"field": "instructions", "baseline": "bad hash", "candidate": "b" * 64}
+        ]
+    with pytest.raises(GitHubPublishError):
+        render_comment(replace(request_data, comparison=result), 123)
+
+
 @pytest.mark.parametrize(
     "user",
     [

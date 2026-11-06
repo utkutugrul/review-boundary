@@ -34,6 +34,14 @@ uv run --frozen review-boundary demo --split all
 
 Open the `report.html` path printed at the end in your browser. The demo uses scripted reviewers, makes no API calls, and needs no API key.
 
+For the new example that follows evidence across several files:
+
+```sh
+uv run --frozen review-boundary repository-demo --output runs/repository-demo
+```
+
+Open `runs/repository-demo/report.html`. [Repository mode guide](docs/repository-mode.md).
+
 ## Explore the dashboard
 
 ```sh
@@ -58,6 +66,7 @@ These screenshots show scripted calibration, which checks the harness rather tha
 - [Connect your reviewer](docs/adapters.md) or [configure model providers](docs/providers.md).
 - [Compare runs](docs/comparison.md), [use GitHub Actions](docs/github-actions.md), or read the [GitHub App setup guide](docs/github-app.md).
 - [Understand the tests and limitations](docs/methodology.md) and [read the recorded real-model results](docs/pilot-v2.md).
+- [Understand experiment records](docs/experiment-records.md) and [review upstream case candidates](docs/upstream-candidates.md).
 - [See the remaining logical gaps](docs/logical-audit.md) and [the plan for realistic repository cases](docs/realistic-corpus-plan.md).
 
 Small, public examples provide limited evidence. Results cover only the tested tasks and observed actions; they cannot certify a reviewer as safe for production repositories.

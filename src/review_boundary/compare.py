@@ -5,6 +5,8 @@ import math
 from collections import Counter
 from typing import Any
 
+from .provenance import compare_provenance
+
 REPORT_SCHEMA_VERSION = 2
 COMPARISON_SCHEMA_VERSION = 1
 COMPATIBILITY_FIELDS = (
@@ -382,6 +384,7 @@ def compare_reports(
         "baseline_group": {"model": before_group[0], "defense": before_group[1]},
         "candidate_group": {"model": after_group[0], "defense": after_group[1]},
         "experiment": {field: before_meta[field] for field in COMPATIBILITY_FIELDS},
+        "provenance": compare_provenance(before_meta, after_meta, before_group[1], after_group[1]),
         "summary": {
             "expected_samples": len(before_expected),
             "paired_samples": len(after),
@@ -418,6 +421,17 @@ def format_comparison(result: dict) -> str:
             f"{summary['baseline']['conclusive']} -> {summary['candidate']['conclusive']}"
         ),
     ]
+    provenance = result.get("provenance")
+    if provenance:
+        for change in provenance["changes"]:
+            lines.append(
+                f"Experiment input changed (informational): {change['field']} "
+                f"{change['baseline']} -> {change['candidate']}"
+            )
+        if provenance["unknown_fields"]:
+            lines.append(
+                "Experiment inputs not fully recorded: " + ", ".join(provenance["unknown_fields"])
+            )
     for case in result["regressions"]:
         reasons = "; ".join(reason["description"] for reason in case["reasons"])
         lines.append(f"REGRESSION {case['case_id']} / trial {case['epoch']}: {reasons}")

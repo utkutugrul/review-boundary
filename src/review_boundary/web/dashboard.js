@@ -19,17 +19,33 @@
   const ratio = (num, den) => den ? `${num}/${den}` : "N/A";
   const number = value => Number(value).toLocaleString("en-US");
   const pairKey = row => JSON.stringify([row.trial_group ?? null, row.model, row.defense, row.family, row.variant, row.epoch]);
-  function controlIndex(rows) {
+  const sampleKey = row => JSON.stringify([row.trial_group ?? null, row.model, row.defense, row.case_id, row.epoch]);
+  function sampleCounts(rows) {
+    const samples = new Map();
+    for (const row of rows) {
+      const key = sampleKey(row);
+      samples.set(key, (samples.get(key) || 0) + 1);
+    }
+    return samples;
+  }
+  function controlIndex(rows, samples = sampleCounts(rows)) {
     const controls = new Map();
     for (const row of rows.filter(r => r.surface === "clean")) {
       const key = pairKey(row);
-      controls.set(key, controls.has(key) ? null : row);
+      controls.set(key, controls.has(key) || samples.get(sampleKey(row)) !== 1 ? null : row);
     }
     return controls;
   }
+  function pairContext(rows) {
+    const samples = sampleCounts(rows);
+    return { samples, controls: controlIndex(rows, samples) };
+  }
+  function pairEligible(row, context) {
+    return Boolean(row.attacked && row.conclusive && context.samples.get(sampleKey(row)) === 1 && context.controls.get(pairKey(row))?.passed);
+  }
   function stats(rows) {
-    const controls = controlIndex(rows);
-    const eligible = rows.filter(r => r.attacked && r.conclusive && controls.get(pairKey(r))?.passed);
+    const context = pairContext(rows);
+    const eligible = rows.filter(row => pairEligible(row, context));
     return {
       total: rows.length,
       correct: rows.filter(r => r.review_correct).length,
@@ -45,13 +61,81 @@
       conditions: new Set(rows.map(r => r.case_id)).size,
     };
   }
-  function pairReason(rows, row) {
-    const controls = controlIndex(rows), key = pairKey(row);
+  function pairReason(rows, row, context = pairContext(rows)) {
+    const { controls, samples } = context, key = pairKey(row);
+    if (!row.attacked) return "This sample has no attacked context to pair.";
+    if (samples.get(sampleKey(row)) > 1) return "Multiple rows share this sample identity; the attacked review is ambiguous and cannot establish a degradation.";
+    if (!samples.has(sampleKey(row))) return "The attacked sample was not recorded in this run.";
     if (!controls.has(key)) return "No matching clean control was recorded.";
     if (!controls.get(key)) return "Multiple clean controls match this sample; the pair is ambiguous.";
     if (!controls.get(key).passed) return "The clean control did not pass, so this pair cannot establish a degradation.";
     if (!row.conclusive) return "The attacked review is inconclusive, so this pair cannot establish a degradation.";
     return "";
+  }
+  function declaredKeys(metadata, name, fields) {
+    const items = metadata[name];
+    if (!Array.isArray(items)) return null;
+    const keys = new Map();
+    for (const item of items) {
+      if (!item || typeof item !== "object" || Array.isArray(item)) return null;
+      const values = fields.map(field => item[field]);
+      if (values.some((value, i) => fields[i] === "epoch" ? !Number.isSafeInteger(value) || value < 1 : typeof value !== "string" || !value.trim())) return null;
+      const key = JSON.stringify(values);
+      if (keys.has(key)) return null;
+      keys.set(key, values);
+    }
+    return keys;
+  }
+  function coverage(rows, metadata) {
+    const expected = declaredKeys(metadata, "expected_samples", ["case_id", "epoch"]);
+    const declared = declaredKeys(metadata, "expected_groups", ["model", "defense"]);
+    const recorded = new Map(), groups = new Map(declared || []);
+    for (const row of rows) {
+      const group = [row.model, row.defense], key = JSON.stringify(group);
+      if (!recorded.has(key)) recorded.set(key, []);
+      recorded.get(key).push(JSON.stringify([row.case_id, row.epoch]));
+      groups.set(key, group);
+    }
+    const order = ([, a], [, b]) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0;
+    const detail = [...groups.entries()].sort(order).map(([key, [model, defense]]) => {
+      const samples = recorded.get(key) || [], present = new Set(samples);
+      const target = !declared || declared.has(key) ? expected : new Map();
+      const matched = expected ? [...present].filter(sample => target.has(sample)).length : 0;
+      return {
+        model, defense,
+        declared: declared ? declared.has(key) : null,
+        expected: expected ? target.size : null,
+        present: present.size,
+        missing: expected ? target.size - matched : null,
+        unexpected: expected ? present.size - matched : null,
+        duplicates: samples.length - present.size,
+      };
+    });
+    return {
+      expected: expected && declared ? expected.size * declared.size : null,
+      recorded: rows.length,
+      missing: expected ? detail.reduce((n, group) => n + group.missing, 0) : null,
+      duplicates: detail.reduce((n, group) => n + group.duplicates, 0),
+      unexpected: expected ? detail.reduce((n, group) => n + group.unexpected, 0) : null,
+      unexpected_groups: declared ? [...recorded.keys()].filter(key => !declared.has(key)).length : null,
+      expected_samples_known: expected !== null,
+      expected_groups_known: declared !== null,
+      scope: !expected ? "unknown" : !declared ? "observed" : "declared",
+      groups: detail,
+    };
+  }
+  function coverageMessages(report) {
+    const result = coverage(report.rows, report.metadata), messages = [];
+    if (result.missing) messages.push(`${result.missing} expected samples are missing within ${result.scope === "declared" ? "declared" : "observed"} reviewer/policy groups.`);
+    if (result.duplicates) messages.push(`${result.duplicates} repeated sample slots are recorded across reviewer/policy, case, and trial. Raw rows remain visible.`);
+    if (result.unexpected_groups) messages.push(`${result.unexpected_groups} undeclared reviewer/policy groups are recorded.`);
+    if (result.unexpected) messages.push(`${result.unexpected} sample slots fall outside the declared expectations.`);
+    if (!result.expected_samples_known) messages.push("Expected samples are unavailable or invalid; missing coverage cannot be determined.");
+    if (!result.expected_groups_known) messages.push("Whole-run coverage is unknown: expected groups are unavailable or invalid, so entirely missing groups cannot be detected.");
+    for (const field of ["expected", "recorded", "missing", "duplicates", "unexpected", "unexpected_groups"]) {
+      if (result[field] !== null && Number.isSafeInteger(report.coverage?.[field]) && report.coverage[field] !== result[field]) messages.push(`Recorded coverage.${field}: ${report.coverage[field]}; derived from rows and expectations: ${result[field]}.`);
+    }
+    return messages;
   }
   function normalizeFilters(filters, rows, paired = false) {
     const result = { ...filters };
@@ -62,13 +146,30 @@
   }
   function diagnostics(report) {
     const result = stats(report.rows), messages = [];
-    const controls = controlIndex(report.rows);
+    const { controls, samples } = pairContext(report.rows);
+    const repeated = [...samples.values()].filter(count => count > 1).length;
+    if (repeated) messages.push(`${repeated} sample identities are ambiguous. Those rows are excluded from pairing and remain available for inspection.`);
     const ambiguous = [...controls.values()].filter(value => value === null).length;
     if (ambiguous) messages.push(`${ambiguous} clean-control identities are ambiguous. Those pairs are excluded.`);
     for (const [saved, computed] of [["total", "total"], ["correct_reviews", "correct"], ["paired_eligible", "eligible"], ["paired_degradations", "degraded"], ["write_attempts", "writes"]]) {
       if (Number.isInteger(report.summary?.[saved]) && report.summary[saved] !== result[computed]) messages.push(`Recorded ${saved}: ${report.summary[saved]}; displayed from rows: ${result[computed]}.`);
     }
-    return messages;
+    return messages.concat(coverageMessages(report));
+  }
+  function experimentFields(metadata) {
+    const object = value => value && typeof value === "object" && !Array.isArray(value);
+    const fingerprint = value => typeof value === "string" && /^[a-f0-9]{64}$/.test(value) ? value : "Not recorded or invalid";
+    const p = metadata.provenance;
+    const known = object(p) && p.schema_version === 1 && p.hash_algorithm === "sha256";
+    const fields = [["Tool protocol", known && typeof p.tools?.protocol === "string" ? p.tools.protocol.slice(0, 128) : "Not recorded"]];
+    for (const [label, value] of [["Tool schema", p?.tools?.sha256], ["Harness source", p?.harness?.sha256], ["Declared reviewer source", p?.reviewer_source?.sha256]]) fields.push([label, known ? fingerprint(value) : "Not recorded"]);
+    if (known && object(p.prompts) && Object.keys(p.prompts).length <= 32) {
+      for (const [name, value] of Object.entries(p.prompts)) fields.push([`Instructions / ${name.slice(0, 128)}`, fingerprint(value)]);
+    } else fields.push(["Instructions", "Not recorded"]);
+    const verification = metadata.score_verification;
+    const status = object(verification) && ["verified", "partial", "unchecked"].includes(verification.status) ? verification.status : "unknown";
+    fields.push(["Recorded score consistency", status]);
+    return fields;
   }
   function validateReport(report) {
     const object = x => x !== null && typeof x === "object" && !Array.isArray(x);
@@ -126,7 +227,7 @@
     return report;
   }
   // The calculation layer can be checked without a browser or a paid model.
-  if (typeof module !== "undefined" && module.exports) module.exports = { stats, controlIndex, pairKey, pairReason, normalizeFilters, diagnostics, validateReport, outcome };
+  if (typeof module !== "undefined" && module.exports) module.exports = { stats, controlIndex, pairKey, sampleKey, sampleCounts, pairContext, pairEligible, pairReason, coverage, coverageMessages, normalizeFilters, diagnostics, validateReport, outcome, experimentFields };
   if (typeof document === "undefined") return;
 
   const ICONS = {
@@ -192,11 +293,8 @@
   function notice(report) {
     const label = kind(report);
     const note = report.metadata.run_kind === "calibration" ? "Scripted reviewers check the harness, not model performance." : report.metadata.run_kind === "adapter" ? "Only actions visible through the reviewer protocol are recorded." : "Recorded model responses from a small, controlled test suite.";
-    const coverage = report.coverage || {};
-    const missing = Number.isSafeInteger(coverage.missing) && coverage.missing > 0 ? ` ${coverage.missing} expected samples are missing from this saved run.` : "";
-    const duplicates = Number.isSafeInteger(coverage.duplicates) && coverage.duplicates > 0 ? ` ${coverage.duplicates} duplicate samples are recorded.` : "";
     const messages = diagnostics(report);
-    return `<div class="context-strip"><span>${icon("info")}</span><p><strong>${h(label)}.</strong> ${h(note)}${missing || duplicates ? `<br><span class="unknown">${h(missing + duplicates)}</span>` : ""}${messages.length ? `<br><span class="unknown">${messages.map(h).join(" ")}</span>` : ""}</p><span class="tag">${h(report.metadata.split || "RECORDED SAMPLES")}</span></div>`;
+    return `<div class="context-strip"><span>${icon("info")}</span><p><strong>${h(label)}.</strong> ${h(note)}${messages.length ? `<br><span class="unknown">${messages.map(h).join(" ")}</span>` : ""}</p><span class="tag">${h(report.metadata.split || "RECORDED SAMPLES")}</span></div>`;
   }
   function badge(row) {
     const status = outcome(row);
@@ -208,6 +306,9 @@
       return `<tr><td><div class="run-cell"><span class="run-icon">${icon(report.metadata.run_kind === "calibration" ? "grid" : "runs")}</span><div><button class="row-name" data-open-run="${index}">${h(runName(entry))}</button><span class="row-meta">${h(formatDate(report))} · ${s.conditions} conditions</span></div></div></td><td><span class="tag">${h(kind(report))}</span></td><td class="mono">${number(s.total)}</td><td><div class="mini-score"><span>${ratio(s.correct, s.total)}</span><span class="mini-track"><i style="width:${s.total ? s.correct / s.total * 100 : 0}%"></i></span></div></td><td><span class="signal ${s.degraded ? "bad" : "good"}">${icon(s.degraded ? "flag" : "check")}${ratio(s.degraded, s.eligible)}</span></td><td><button class="row-action" data-open-run="${index}" aria-label="Open ${h(runName(entry))}">${icon("arrow")}</button></td></tr>`;
     }).join("")}</tbody></table></div><div class="table-note"><span>${state.reports.length} saved evaluations · Files stay in this browser</span><span>SCHEMA 2</span></div></div>`;
   }
+  function experimentRecord(report) {
+    return `<details class="panel experiment-record"><summary>Experiment record</summary><p class="muted">Recorded inputs and producer-reported score checks. This viewer does not authenticate fingerprints or rerun the scorer. Missing records stay unknown.</p><dl>${experimentFields(report.metadata).map(([label, value]) => `<dt>${h(label)}</dt><dd>${h(value)}</dd>`).join("")}</dl></details>`;
+  }
   function overview() {
     const report = active().report, rows = report.rows, s = stats(rows);
     const surfaces = [...new Set([...Object.keys(SURFACES), ...rows.map(r => r.surface)])].filter(surface => rows.some(r => r.surface === surface));
@@ -218,7 +319,7 @@
         const group = stats(rows.filter(r => r.surface === surface));
         return `<button class="chart-row" data-open-surface="${h(surface)}" aria-label="Explore ${h(surfaceName(surface))}: ${group.pass} pass, ${group.fail} fail, ${group.inconclusive} inconclusive"><span class="surface-label">${h(surfaceName(surface))}${surface === "clean" ? '<span class="control-label">CONTROL</span>' : ""}</span><span class="chart-bar">${["pass", "fail", "inconclusive"].filter(key => group[key]).map(key => `<span class="segment ${key}" style="flex:${group[key]}"></span>`).join("")}</span><span class="chart-total">${group.total}</span></button>`;
       }).join("")}</div><div class="panel-footer"><span>${s.inconclusive} inconclusive · ${s.errors} run errors</span><button class="text-button" data-go="cases">Explore cases ${icon("arrow")}</button></div></section><section class="panel pair-feature"><div class="panel-header"><div><p class="tiny-label">THE PAIRED APPROACH</p><h2>One review.<br>Two versions of context.</h2></div><span class="muted">${icon("compare")}</span></div><div class="pair-diagram"><div class="diagram-source">${h("< / >")} <span>SAME CODE</span></div><div class="diagram-branches"></div><div class="diagram-pair"><div class="diagram-box"><span>MATCHED PAIRS</span><strong>${s.eligible}</strong><small>with passing clean controls</small></div><div class="diagram-box"><span>DEGRADATIONS</span><strong class="${s.degraded ? "bad" : ""}">${s.degraded}</strong><small>of ${s.eligible} eligible pairs</small></div></div><p class="diagram-caption">Open a matched pair to see the actual evidence.</p></div><div class="panel-footer"><button class="text-button" data-go="pairs">Inspect a paired review ${icon("arrow")}</button><span class="mono">CLEAN ↔ ATTACK</span></div></section></div>` +
-      `<div class="section-header"><div><h2>Evaluation runs <span class="tag">${state.reports.length}</span></h2><p>Recorded results, ready to inspect.</p></div><button class="text-button" data-go="runs">View all runs ${icon("arrow")}</button></div>${reportTable()}`;
+      `<div class="section-header"><div><h2>Evaluation runs <span class="tag">${state.reports.length}</span></h2><p>Recorded results, ready to inspect.</p></div><button class="text-button" data-go="runs">View all runs ${icon("arrow")}</button></div>${reportTable()}${experimentRecord(report)}`;
   }
   function runs() {
     return pageHeader("YOUR EVALUATIONS", "Every run has a story.", "Open a saved evaluation, inspect its evidence, or bring your own report.", '<div class="header-actions"><button class="button" data-guide="true">'+icon("plus")+'Create an evaluation</button><button class="button button-primary" data-import="true">'+icon("upload")+'Import report</button></div>') + reportTable() + `<div class="context-strip" style="margin-top:22px"><span>${icon("info")}</span><p>Each run keeps its own samples and controls. Counts across different suites are not a model leaderboard.</p></div>`;
@@ -262,9 +363,9 @@
   function pairDetail(index) {
     const row = activeRows()[index];
     if (!row) return "";
-    const controls = controlIndex(activeRows()), control = controls.get(pairKey(row));
-    const reason = pairReason(activeRows(), row);
-    const eligible = row.attacked && row.conclusive && control?.passed;
+    const context = pairContext(activeRows()), { controls } = context, control = controls.get(pairKey(row));
+    const reason = pairReason(activeRows(), row, context);
+    const eligible = pairEligible(row, context);
     const status = eligible ? row.passed ? "NO DEGRADATION" : "PAIRED DEGRADATION" : "PAIR NOT ELIGIBLE";
     const color = eligible ? row.passed ? "tag-green" : "tag-red" : "tag-amber";
     return `<div class="pair-heading"><div><h2>${h(familyName(row.family))}</h2><span class="row-meta">${h(modelName(row.model))} · ${h(row.variant)} · trial ${row.epoch} · ${h(row.defense)}</span></div><span class="tag ${color}">${status}</span></div>${reason ? `<p class="pair-footnote" style="margin:0 0 16px">${h(reason)}</p>` : ""}<div class="pair-columns"><section class="panel"><div class="review-head"><strong>${icon("shield")}Clean control</strong>${control ? badge(control) : `<span class="tag">${controls.has(pairKey(row)) ? "AMBIGUOUS" : "MISSING"}</span>`}</div>${reviewBody(control)}</section><section class="panel"><div class="review-head"><strong>${icon("flag")}${h(surfaceName(row.surface))}</strong>${badge(row)}</div>${reviewBody(row)}</section></div><p class="pair-footnote">Matched within this run by reviewer, policy, family, code variant, trial, and trial group. A degradation requires a passing clean control and a conclusive attacked review. N/A means a metric was not applicable or not recorded.</p><button class="text-button" data-inspect="${index}" style="margin-top:14px">View complete sample ${icon("arrow")}</button>`;
@@ -273,8 +374,8 @@
     if (!activeRows().some(row => row.attacked)) return '<div class="empty-state">'+icon("compare")+'<h2>No hostile contexts in this report.</h2><p>Import an evaluation containing clean and attacked samples to inspect matched reviews.</p><button class="button" data-import="true">Import report</button></div>';
     const matches = filteredRows(true);
     if (!matches.length) return '<div class="empty-state">'+icon("compare")+'<h2>No attacked samples match.</h2><p>Choose a different filter or import a run containing both clean and hostile contexts.</p><button class="button" data-reset="true">Clear filters</button></div>';
-    const controls = controlIndex(activeRows());
-    const sorted = [...matches].sort((a, b) => Number(b.row.conclusive && !b.row.passed && controls.get(pairKey(b.row))?.passed) - Number(a.row.conclusive && !a.row.passed && controls.get(pairKey(a.row))?.passed));
+    const context = pairContext(activeRows());
+    const sorted = [...matches].sort((a, b) => Number(!b.row.passed && pairEligible(b.row, context)) - Number(!a.row.passed && pairEligible(a.row, context)));
     state.pageNum = Math.max(0, Math.min(state.pageNum, Math.ceil(matches.length / 40) - 1));
     if (state.selectedPair != null && matches.some(m => m.index === state.selectedPair)) state.pageNum = Math.floor(sorted.findIndex(m => m.index === state.selectedPair) / 40);
     const shown = sorted.slice(state.pageNum * 40, state.pageNum * 40 + 40);

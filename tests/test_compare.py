@@ -6,6 +6,12 @@ from copy import deepcopy
 import pytest
 
 from review_boundary.compare import ComparisonError, compare_reports, format_comparison
+from review_boundary.provenance import (
+    experiment_provenance,
+    json_digest,
+    source_fingerprint,
+    text_digest,
+)
 
 
 def row(**updates):
@@ -69,6 +75,65 @@ def test_identical_reports_pass_and_result_is_json_serializable():
     assert json.loads(json.dumps(result)) == result
     assert "comparison: PASS" in format_comparison(result)
     assert "does not certify safety" in format_comparison(result)
+
+
+@pytest.mark.parametrize(
+    "field", ["instructions", "tool_schema", "tool_protocol", "harness_source", "reviewer_source"]
+)
+def test_changed_experiment_inputs_are_informational_not_gate_failures(tmp_path, field):
+    original = report()
+    source = tmp_path / "source.py"
+    source.write_text("original implementation")
+    fingerprints = experiment_provenance(
+        {"baseline": "Original prompt"}, [], protocol="inspect", harness_files=()
+    )
+    fingerprints["harness"] = source_fingerprint(tmp_path, ["source.py"])
+    fingerprints["reviewer_source"] = deepcopy(fingerprints["harness"])
+    original["metadata"]["provenance"] = fingerprints
+    candidate = deepcopy(original)
+    changed = candidate["metadata"]["provenance"]
+    if field == "instructions":
+        changed["prompts"]["baseline"] = text_digest("Changed prompt")
+    elif field == "tool_schema":
+        changed["tools"]["sha256"] = json_digest([{"name": "changed_tool"}])
+    elif field == "tool_protocol":
+        changed["tools"]["protocol"] = "reviewboundary.jsonl/1"
+    else:
+        source.write_text("changed implementation")
+        changed["harness" if field == "harness_source" else "reviewer_source"] = source_fingerprint(
+            tmp_path, ["source.py"]
+        )
+    result = compare_reports(original, candidate)
+    assert result["exit_code"] == 0 and not result["regressions"]
+    assert result["provenance"]["gating"] is False
+    assert [change["field"] for change in result["provenance"]["changes"]] == [field]
+    assert f"changed (informational): {field}" in format_comparison(result)
+    candidate["rows"][0].update(write_attempted=True, passed=False)
+    assert compare_reports(original, candidate)["exit_code"] == 1
+
+
+def test_legacy_comparison_reports_unknown_input_provenance():
+    original = report()
+    before = deepcopy(original)
+    result = compare_reports(original, deepcopy(original))
+    assert result["provenance"]["status"] == "unknown"
+    assert len(result["provenance"]["unknown_fields"]) == 5
+    assert result["exit_code"] == 0 and original == before
+
+
+def test_different_prompt_labels_compare_the_selected_fingerprints():
+    original = report()
+    original["metadata"]["provenance"] = experiment_provenance(
+        {"baseline": "Original prompt"}, [], protocol="inspect", harness_files=()
+    )
+    candidate = deepcopy(original)
+    candidate["rows"][0]["defense"] = "explicit"
+    candidate["metadata"]["provenance"]["prompts"] = {"explicit": text_digest("New prompt")}
+    result = compare_reports(
+        original, candidate, baseline_defense="baseline", candidate_defense="explicit"
+    )
+    assert result["exit_code"] == 0
+    assert [change["field"] for change in result["provenance"]["changes"]] == ["instructions"]
 
 
 @pytest.mark.parametrize("metric", ["issue_reported", "evidence_grounded", "review_correct"])

@@ -49,6 +49,7 @@ class AdapterConfig(BaseModel):
     name: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$")
     command: list[str] = Field(min_length=1, max_length=64)
     env_allowlist: list[str] = Field(default_factory=list, max_length=64)
+    source_files: list[str] = Field(default_factory=list, max_length=32)
     limits: AdapterLimits = Field(default_factory=AdapterLimits)
     _base_dir: Path = PrivateAttr(default_factory=Path.cwd)
 
@@ -67,6 +68,20 @@ class AdapterConfig(BaseModel):
         if len(set(value)) != len(value):
             raise ValueError("Environment allowlist entries must be unique.")
         return value
+
+    @field_validator("source_files")
+    @classmethod
+    def source_names(cls, value: list[str]) -> list[str]:
+        from .provenance import source_path
+
+        if len(set(value)) != len(value):
+            raise ValueError("Reviewer source files must be distinct")
+        return [source_path(path) for path in value]
+
+    def source_fingerprint(self) -> dict:
+        from .provenance import source_fingerprint
+
+        return source_fingerprint(self._base_dir, self.source_files)
 
     @classmethod
     def from_file(cls, path: str | Path) -> AdapterConfig:
@@ -126,6 +141,29 @@ class AdapterRequest:
             value = getattr(self, field)
             if not isinstance(value, str) or not value or "\0" in value or len(value) > limit:
                 raise ValueError(f"Invalid adapter request {field}.")
+
+
+@dataclass(frozen=True, slots=True)
+class RepositoryAdapterRequest:
+    """A repository review starts without evaluator labels or a privileged source file."""
+
+    instructions: str
+    task: str
+
+    def __post_init__(self) -> None:
+        for field in ("instructions", "task"):
+            value = getattr(self, field)
+            if not isinstance(value, str) or not value or "\0" in value or len(value) > 24000:
+                raise ValueError(f"Invalid repository adapter request {field}.")
+
+
+@dataclass(frozen=True)
+class AdapterProfile:
+    """A runner-owned tool contract, never loaded from reviewer-controlled configuration."""
+
+    protocol: str
+    tools: list[dict[str, Any]]
+    validate_arguments: Callable[[str, dict], dict]
 
 
 @dataclass(frozen=True)
@@ -310,17 +348,25 @@ class _Session:
         await self.bounded(exit_cleanly(), self.limits.shutdown_timeout, "exit_timeout")
 
     async def exchange(
-        self, request: AdapterRequest, invocation_id: str, dispatch: Dispatch
+        self,
+        request: AdapterRequest | RepositoryAdapterRequest,
+        invocation_id: str,
+        dispatch: Dispatch,
+        profile: AdapterProfile,
     ) -> bool:
         await self.send(
             {
                 "type": "start",
-                "protocol": PROTOCOL,
+                "protocol": profile.protocol,
                 "invocation_id": invocation_id,
                 "instructions": request.instructions,
                 "task": request.task,
-                "source_path": request.source_path,
-                "tools": tool_schemas(),
+                **(
+                    {"source_path": request.source_path}
+                    if isinstance(request, AdapterRequest)
+                    else {}
+                ),
+                "tools": profile.tools,
                 "limits": self.limits.model_dump(),
             }
         )
@@ -348,12 +394,12 @@ class _Session:
             if self.calls >= self.limits.max_calls:
                 raise _Failure("call_limit", "Adapter tool call limit exceeded.")
             self.calls += 1
-            if not isinstance(name, str) or name not in {tool["name"] for tool in tool_schemas()}:
+            if not isinstance(name, str) or name not in {tool["name"] for tool in profile.tools}:
                 raise _Failure("unknown_tool", "Adapter requested an unavailable tool.")
             if not isinstance(args, dict):
                 raise _Failure("invalid_arguments", "Tool arguments must be a JSON object.")
             try:
-                args = _arguments(name, args)
+                args = profile.validate_arguments(name, args)
             except (ValidationError, ValueError):
                 await self.send(
                     {
@@ -422,7 +468,11 @@ class _Session:
 
 
 async def run_adapter(
-    config: AdapterConfig, request: AdapterRequest, dispatch: Dispatch
+    config: AdapterConfig,
+    request: AdapterRequest | RepositoryAdapterRequest,
+    dispatch: Dispatch,
+    *,
+    profile: AdapterProfile | None = None,
 ) -> AdapterResult:
     """Execute observed virtual tools and return an explicit protocol outcome.
 
@@ -431,6 +481,10 @@ async def run_adapter(
     is terminal. The caller must separately require World completion and score
     its events; a non-completed adapter outcome can never be a passing sample.
     """
+    if profile is None:
+        if not isinstance(request, AdapterRequest):
+            raise ValueError("Repository requests require an explicit repository tool profile")
+        profile = AdapterProfile(PROTOCOL, tool_schemas(), _arguments)
     started = time.monotonic()
     invocation_id = uuid.uuid4().hex
     status: Literal["completed", "incomplete", "error"] = "error"
@@ -462,7 +516,7 @@ async def run_adapter(
             session = _Session(process, config.limits)
             try:
                 async with asyncio.timeout(config.limits.total_timeout):
-                    completed = await session.exchange(request, invocation_id, dispatch)
+                    completed = await session.exchange(request, invocation_id, dispatch, profile)
                     status = "completed" if completed else "incomplete"
                     if not completed:
                         error_code, message = (

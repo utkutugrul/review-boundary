@@ -2,10 +2,15 @@
 
 import json
 from collections import Counter
+from typing import Any
 
 from inspect_ai.log import EvalLog
+from inspect_ai.model import ChatMessageAssistant, ChatMessageSystem
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from .cases import Case, suite_digest
+from .provenance import json_digest, text_digest, validate_provenance
+from .world import Review, World, score_world
 
 VERSION = "0.2.0"
 BOUND_FIELDS = ("max_turns", "max_input_bytes", "max_output_tokens")
@@ -16,6 +21,26 @@ V2_METRICS = (
     "attack_goal_eligible",
     "attack_goal_reached",
 )
+V2_SCORE_VALUES = (
+    "completed",
+    "conclusive",
+    "review_correct",
+    "write_attempted",
+    "workspace_modified",
+    "passed",
+)
+
+
+class _RecordedWorld(BaseModel):
+    """Validate stored v0.2 state without coercing types or filling absent fields."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+    files: dict[str, str]
+    reads: list[str]
+    events: list[dict[str, Any]]
+    review: Review | None
+    exposed: bool
+    block_writes: bool
 
 
 class ReconstructionError(ValueError):
@@ -142,23 +167,178 @@ def _sample_config(sample, bounds: dict, label: str) -> None:
         _same(world.get("block_writes"), bounds["block_writes"], f"{label} world.block_writes")
 
 
-def validate_logs(logs: list[EvalLog], metadata: dict) -> None:
+def _recorded_provenance(metadata: dict, label: str) -> dict | None:
+    value = metadata.get("provenance")
+    if value is not None:
+        try:
+            validate_provenance(value)
+        except (ValueError, TypeError, RecursionError) as error:
+            raise ReconstructionError(f"{label} has invalid experiment provenance") from error
+    return value
+
+
+def _match_provenance(manifest: dict | None, task: dict | None, defense: str, label: str) -> None:
+    if (manifest is None) != (task is None):
+        raise ReconstructionError(f"{label} provenance is missing from the manifest or task")
+    if manifest is None:
+        return
+    for value in (manifest, task):
+        if defense not in value["prompts"]:
+            raise ReconstructionError(f"{label} provenance has no selected-defense prompt hash")
+        if value["tools"]["protocol"] != "inspect":
+            raise ReconstructionError(f"{label} provenance requires the inspect tool protocol")
+    _same(task["prompts"][defense], manifest["prompts"][defense], f"{label} provenance prompt")
+    for field in ("tools", "harness", "reviewer_source"):
+        _same(task[field], manifest[field], f"{label} provenance {field}")
+
+
+def _prompt_matches(messages, expected: str, sample, label: str, *, allow_absent=False) -> bool:
+    systems = [message for message in messages if isinstance(message, ChatMessageSystem)]
+    if not systems and allow_absent:
+        return False
+    if len(systems) != 1:
+        raise ReconstructionError(f"{label} must record exactly one task system message")
+    content = systems[0].content
+    # Provider representations may wrap text in a block with opaque internal state.
+    if isinstance(content, list) and len(content) == 1 and content[0].type == "text":
+        content = content[0].text
+    if not isinstance(content, str):
+        raise ReconstructionError(f"{label} system prompt is not recorded as exact text")
+    # Inspect condenses repeated text in event inputs into public attachment references.
+    # Resolve only the referenced text, without rewriting the original log or reading files.
+    for prefix in ("attachment://", "tc://"):
+        if content.startswith(prefix):
+            content = sample.attachments.get(content.removeprefix(prefix))
+            if not isinstance(content, str):
+                raise ReconstructionError(f"{label} system prompt attachment is missing")
+            break
+    _same(text_digest(content), expected, f"{label} recorded system prompt hash")
+    return True
+
+
+def _verify_sample_provenance(
+    sample, provenance: dict, defense: str, label: str
+) -> tuple[bool, int]:
+    generations = [event for event in sample.events if event.event == "model"]
+    prompt_hash = provenance["prompts"][defense]
+    observed = _prompt_matches(
+        sample.messages,
+        prompt_hash,
+        sample,
+        label,
+        allow_absent=bool(sample.error) and not generations,
+    )
+    for index, event in enumerate(generations, 1):
+        event_label = f"{label} generation {index}"
+        _prompt_matches(event.input, prompt_hash, sample, event_label)
+        # Match only the advertised fields fingerprinted by native_tool_schemas.
+        # Provider options and internal state are outside this declared scope.
+        tools = [
+            {
+                "name": tool.name,
+                "description": tool.description,
+                "parameters": tool.parameters.model_dump(mode="json", exclude_none=True),
+            }
+            for tool in event.tools
+        ]
+        _same(json_digest(tools), provenance["tools"]["sha256"], f"{event_label} tool schema hash")
+    return observed, len(generations)
+
+
+def _verify_v2_score(sample, case: Case, label: str) -> bool:
+    """Compare original scorer output to its recorded inputs, without editing either.
+
+    This checks consistency, not authenticity or independent transcript replay. The
+    raw scorer does not see later execution errors. Report rendering separately
+    marks errored samples inconclusive and nonpassing while retaining observations.
+    """
+    stored = (sample.store or {}).get("world")
+    if stored is None:
+        raise ReconstructionError(f"{label} cannot verify scores without a recorded world")
+    try:
+        validated = _RecordedWorld.model_validate(stored, strict=True)
+        # Any-valued event details must still be finite, serializable JSON.
+        json.dumps(stored, allow_nan=False)
+    except (ValidationError, TypeError, ValueError, RecursionError) as error:
+        raise ReconstructionError(f"{label} has an invalid recorded world") from error
+    if set(validated.files) != set(case.files):
+        raise ReconstructionError(f"{label} recorded world has unexpected or missing files")
+    if any(path not in {*case.files, "pull_request"} for path in validated.reads):
+        raise ReconstructionError(f"{label} recorded world has an unknown read resource")
+    if any(
+        event.get("tool") not in ("read_pr", "read_file", "write_file", "submit_review")
+        for event in validated.events
+    ):
+        raise ReconstructionError(f"{label} recorded world has an invalid tool event")
+    world = World(**validated.model_dump())
+    score = (sample.scores or {}).get("review_score")
+    if score is None:
+        if sample.error:
+            return False
+        raise ReconstructionError(f"{label} cannot verify a successful sample without review_score")
+    if not isinstance(score.metadata, dict):
+        raise ReconstructionError(f"{label} review_score requires recorded metadata")
+    write_requests = sum(
+        call.function == "write_file"
+        for message in sample.messages
+        if isinstance(message, ChatMessageAssistant)
+        for call in message.tool_calls or []
+    )
+    expected = score_world(case, world, write_requests=write_requests)
+    expected["stop_reason"] = (sample.store or {}).get("stop_reason")
+    if set(score.metadata) != set(expected):
+        raise ReconstructionError(f"{label} score metadata fields do not match scorer {VERSION}")
+    for field, value in expected.items():
+        _same(score.metadata[field], value, f"{label} recomputed score {field}")
+    if not isinstance(score.value, dict) or set(score.value) != set(V2_SCORE_VALUES):
+        raise ReconstructionError(f"{label} score value fields do not match scorer {VERSION}")
+    for field in V2_SCORE_VALUES:
+        _same(score.value[field], int(expected[field]), f"{label} recomputed score value {field}")
+    return True
+
+
+def validate_logs(
+    logs: list[EvalLog], metadata: dict, *, verify_scores: bool = False
+) -> dict | None:
     """Reject old, mixed, duplicated, or incomplete log sets before report reconstruction.
 
     Coverage means an actual recorded sample, including failed samples. No provider
     request is made and no successful model outcome is required. Inspect stores the
     task version in ``eval.task_version``, not ``eval.version``.
+
+    With ``verify_scores=True``, compare supported v0.2 scores to their recorded
+    Case, World and assistant messages. No original score is replaced. Missing
+    state or inconsistent scores fail closed; errored samples with no score remain
+    explicitly unscored. The returned summary is ``partial`` when any such errors
+    exist, otherwise ``verified``. This is a consistency check, not authentication.
+    The default preserves the original provenance-only validation and None return.
+    Optional experiment fingerprints are always checked when present. Both absent
+    remains unknown; one missing copy or a contradictory recorded input is rejected.
+    Historical source hashes are compared to each other, never to current files.
     """
     expected, expected_groups = _manifest(metadata)
     if not isinstance(logs, (list, tuple)) or not logs:
         raise ReconstructionError("Reconstruction requires at least one complete Inspect log")
     bounds = metadata["bounds"]
+    manifest_provenance = _recorded_provenance(metadata, "Manifest")
     expected_ids = {case_id for case_id, _ in expected}
     seen_eval_ids: set[str] = set()
     seen_task_ids: set[str] = set()
     seen_groups: set[tuple[str, str]] = set()
     seen_samples: set[tuple[str, str, str, int]] = set()
     model_runs: dict[str, str] = {}
+    verified_samples = 0
+    unscored_error_samples = 0
+    provenance_summary = {
+        "status": "unknown",
+        "verified_metadata_logs": 0,
+        "unknown_logs": 0,
+        "verified_prompt_samples": 0,
+        "unobserved_prompt_samples": 0,
+        "verified_model_events": 0,
+        "samples_without_model_events": 0,
+        "unknown_source_fields": [],
+    }
     for log in logs:
         if not isinstance(log, EvalLog):
             raise ReconstructionError("Reconstruction inputs must be Inspect EvalLog objects")
@@ -178,6 +358,17 @@ def validate_logs(logs: list[EvalLog], metadata: dict) -> None:
             raise ReconstructionError(f"{label} is missing task metadata")
         model = _text(spec.model, f"{label} model")
         defense = _text(task_metadata.get("defense"), f"{label} defense")
+        task_provenance = _recorded_provenance(task_metadata, label)
+        _match_provenance(manifest_provenance, task_provenance, defense, label)
+        if task_provenance is None:
+            provenance_summary["unknown_logs"] += 1
+        else:
+            provenance_summary["verified_metadata_logs"] += 1
+            provenance_summary["unknown_source_fields"] = [
+                field
+                for field in ("harness", "reviewer_source")
+                if task_provenance[field]["status"] == "not_recorded"
+            ]
         group = model, defense
         if group not in expected_groups:
             raise ReconstructionError(f"{label} has an unexpected model/prompt group {group!r}")
@@ -248,6 +439,15 @@ def validate_logs(logs: list[EvalLog], metadata: dict) -> None:
             if stored_case is not None:
                 _same(stored_case, case.to_dict(), f"{sample_label} stored case")
             _sample_config(sample, bounds, sample_label)
+            if task_provenance is not None:
+                observed, calls = _verify_sample_provenance(
+                    sample, task_provenance, defense, sample_label
+                )
+                provenance_summary[
+                    "verified_prompt_samples" if observed else "unobserved_prompt_samples"
+                ] += 1
+                provenance_summary["verified_model_events"] += calls
+                provenance_summary["samples_without_model_events"] += int(not calls)
             score = (sample.scores or {}).get("review_score")
             if score is not None and score.metadata:
                 for field, value in (
@@ -261,6 +461,11 @@ def validate_logs(logs: list[EvalLog], metadata: dict) -> None:
                     raise ReconstructionError(
                         f"{sample_label} contains pre-v2 or incomplete score metadata"
                     )
+            if verify_scores:
+                if _verify_v2_score(sample, case, sample_label):
+                    verified_samples += 1
+                else:
+                    unscored_error_samples += 1
         if seen != expected:
             missing = sorted(expected - seen)
             raise ReconstructionError(f"{label} is missing expected samples: {missing!r}")
@@ -281,3 +486,20 @@ def validate_logs(logs: list[EvalLog], metadata: dict) -> None:
         raise ReconstructionError(
             f"Missing expected model/prompt groups: {sorted(expected_groups - seen_groups)!r}"
         )
+    if verify_scores:
+        if provenance_summary["verified_metadata_logs"]:
+            provenance_summary["status"] = (
+                "partial"
+                if provenance_summary["unknown_source_fields"]
+                or provenance_summary["unobserved_prompt_samples"]
+                or provenance_summary["samples_without_model_events"]
+                else "verified"
+            )
+        return {
+            "scoring_version": VERSION,
+            "status": "partial" if unscored_error_samples else "verified",
+            "verified_samples": verified_samples,
+            "unscored_error_samples": unscored_error_samples,
+            "provenance_verification": provenance_summary,
+        }
+    return None

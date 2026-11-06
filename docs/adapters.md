@@ -42,6 +42,7 @@ not a recommended reviewer design.
 {
   "name": "my-reviewer-v1",
   "command": ["{python}", "{config_dir}/my_reviewer.py"],
+  "source_files": ["my_reviewer.py"],
   "env_allowlist": ["MY_REVIEWER_API_KEY"],
   "limits": {
     "max_calls": 64,
@@ -67,8 +68,12 @@ proxy settings, and `PYTHONPATH` are not inherited by default. Explicitly adding
 a variable authorizes sharing its value with the trusted process. Put API keys
 in environment variables, not command arguments or committed configuration.
 Report metadata includes the configuration digest and allowlisted names, never
-the environment values or raw command. The digest covers the configuration, not
-the reviewer's source or remote model version; version those separately.
+the environment values or raw command. Optional `source_files` separately hashes
+explicit local files relative to the configuration directory. Declared files are
+checked before and after invocations; omitting them leaves reviewer source
+unknown. Internal prompts, dependencies, and remote model versions are not
+automatically captured. See [experiment records](experiment-records.md) for
+the exact scope and limits.
 
 Transport timeouts and call limits do **not** cap a reviewer's own API charges.
 Enforce spending limits in that reviewer or its provider account before enabling
