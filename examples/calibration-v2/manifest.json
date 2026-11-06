@@ -1,0 +1,629 @@
+{
+  "run_id": "20261106T060006Z-6fdb2a7e",
+  "suite_sha256": "5de12b92968a59c03cf4b21aa725d0053dd427f033a520aa6aff55f8624b13c0",
+  "inspect_ai_version": "0.3.287",
+  "project_version": "0.2.0",
+  "run_kind": "calibration",
+  "scoring_version": "0.2.0",
+  "corpus_version": "0.2.0",
+  "split": "all",
+  "language": null,
+  "expected_samples": [
+    {
+      "case_id": "tenant_lookup/vulnerable/clean",
+      "epoch": 1
+    },
+    {
+      "case_id": "tenant_lookup/vulnerable/pr_body",
+      "epoch": 1
+    },
+    {
+      "case_id": "tenant_lookup/vulnerable/readme",
+      "epoch": 1
+    },
+    {
+      "case_id": "tenant_lookup/vulnerable/code_comment",
+      "epoch": 1
+    },
+    {
+      "case_id": "tenant_lookup/vulnerable/tool_output",
+      "epoch": 1
+    },
+    {
+      "case_id": "tenant_lookup/vulnerable/benign_quote",
+      "epoch": 1
+    },
+    {
+      "case_id": "tenant_lookup/fixed/clean",
+      "epoch": 1
+    },
+    {
+      "case_id": "tenant_lookup/fixed/pr_body",
+      "epoch": 1
+    },
+    {
+      "case_id": "tenant_lookup/fixed/readme",
+      "epoch": 1
+    },
+    {
+      "case_id": "tenant_lookup/fixed/code_comment",
+      "epoch": 1
+    },
+    {
+      "case_id": "tenant_lookup/fixed/tool_output",
+      "epoch": 1
+    },
+    {
+      "case_id": "tenant_lookup/fixed/benign_quote",
+      "epoch": 1
+    },
+    {
+      "case_id": "signed_webhook/vulnerable/clean",
+      "epoch": 1
+    },
+    {
+      "case_id": "signed_webhook/vulnerable/pr_body",
+      "epoch": 1
+    },
+    {
+      "case_id": "signed_webhook/vulnerable/readme",
+      "epoch": 1
+    },
+    {
+      "case_id": "signed_webhook/vulnerable/code_comment",
+      "epoch": 1
+    },
+    {
+      "case_id": "signed_webhook/vulnerable/tool_output",
+      "epoch": 1
+    },
+    {
+      "case_id": "signed_webhook/vulnerable/benign_quote",
+      "epoch": 1
+    },
+    {
+      "case_id": "signed_webhook/fixed/clean",
+      "epoch": 1
+    },
+    {
+      "case_id": "signed_webhook/fixed/pr_body",
+      "epoch": 1
+    },
+    {
+      "case_id": "signed_webhook/fixed/readme",
+      "epoch": 1
+    },
+    {
+      "case_id": "signed_webhook/fixed/code_comment",
+      "epoch": 1
+    },
+    {
+      "case_id": "signed_webhook/fixed/tool_output",
+      "epoch": 1
+    },
+    {
+      "case_id": "signed_webhook/fixed/benign_quote",
+      "epoch": 1
+    },
+    {
+      "case_id": "user_search/vulnerable/clean",
+      "epoch": 1
+    },
+    {
+      "case_id": "user_search/vulnerable/pr_body",
+      "epoch": 1
+    },
+    {
+      "case_id": "user_search/vulnerable/readme",
+      "epoch": 1
+    },
+    {
+      "case_id": "user_search/vulnerable/code_comment",
+      "epoch": 1
+    },
+    {
+      "case_id": "user_search/vulnerable/tool_output",
+      "epoch": 1
+    },
+    {
+      "case_id": "user_search/vulnerable/benign_quote",
+      "epoch": 1
+    },
+    {
+      "case_id": "user_search/fixed/clean",
+      "epoch": 1
+    },
+    {
+      "case_id": "user_search/fixed/pr_body",
+      "epoch": 1
+    },
+    {
+      "case_id": "user_search/fixed/readme",
+      "epoch": 1
+    },
+    {
+      "case_id": "user_search/fixed/code_comment",
+      "epoch": 1
+    },
+    {
+      "case_id": "user_search/fixed/tool_output",
+      "epoch": 1
+    },
+    {
+      "case_id": "user_search/fixed/benign_quote",
+      "epoch": 1
+    },
+    {
+      "case_id": "document_path/vulnerable/clean",
+      "epoch": 1
+    },
+    {
+      "case_id": "document_path/vulnerable/pr_body",
+      "epoch": 1
+    },
+    {
+      "case_id": "document_path/vulnerable/readme",
+      "epoch": 1
+    },
+    {
+      "case_id": "document_path/vulnerable/code_comment",
+      "epoch": 1
+    },
+    {
+      "case_id": "document_path/vulnerable/tool_output",
+      "epoch": 1
+    },
+    {
+      "case_id": "document_path/vulnerable/benign_quote",
+      "epoch": 1
+    },
+    {
+      "case_id": "document_path/fixed/clean",
+      "epoch": 1
+    },
+    {
+      "case_id": "document_path/fixed/pr_body",
+      "epoch": 1
+    },
+    {
+      "case_id": "document_path/fixed/readme",
+      "epoch": 1
+    },
+    {
+      "case_id": "document_path/fixed/code_comment",
+      "epoch": 1
+    },
+    {
+      "case_id": "document_path/fixed/tool_output",
+      "epoch": 1
+    },
+    {
+      "case_id": "document_path/fixed/benign_quote",
+      "epoch": 1
+    },
+    {
+      "case_id": "ts_batch_export/vulnerable/clean",
+      "epoch": 1
+    },
+    {
+      "case_id": "ts_batch_export/vulnerable/pr_body",
+      "epoch": 1
+    },
+    {
+      "case_id": "ts_batch_export/vulnerable/readme",
+      "epoch": 1
+    },
+    {
+      "case_id": "ts_batch_export/vulnerable/code_comment",
+      "epoch": 1
+    },
+    {
+      "case_id": "ts_batch_export/vulnerable/tool_output",
+      "epoch": 1
+    },
+    {
+      "case_id": "ts_batch_export/vulnerable/benign_quote",
+      "epoch": 1
+    },
+    {
+      "case_id": "ts_batch_export/fixed/clean",
+      "epoch": 1
+    },
+    {
+      "case_id": "ts_batch_export/fixed/pr_body",
+      "epoch": 1
+    },
+    {
+      "case_id": "ts_batch_export/fixed/readme",
+      "epoch": 1
+    },
+    {
+      "case_id": "ts_batch_export/fixed/code_comment",
+      "epoch": 1
+    },
+    {
+      "case_id": "ts_batch_export/fixed/tool_output",
+      "epoch": 1
+    },
+    {
+      "case_id": "ts_batch_export/fixed/benign_quote",
+      "epoch": 1
+    },
+    {
+      "case_id": "ts_hmac_prefix/vulnerable/clean",
+      "epoch": 1
+    },
+    {
+      "case_id": "ts_hmac_prefix/vulnerable/pr_body",
+      "epoch": 1
+    },
+    {
+      "case_id": "ts_hmac_prefix/vulnerable/readme",
+      "epoch": 1
+    },
+    {
+      "case_id": "ts_hmac_prefix/vulnerable/code_comment",
+      "epoch": 1
+    },
+    {
+      "case_id": "ts_hmac_prefix/vulnerable/tool_output",
+      "epoch": 1
+    },
+    {
+      "case_id": "ts_hmac_prefix/vulnerable/benign_quote",
+      "epoch": 1
+    },
+    {
+      "case_id": "ts_hmac_prefix/fixed/clean",
+      "epoch": 1
+    },
+    {
+      "case_id": "ts_hmac_prefix/fixed/pr_body",
+      "epoch": 1
+    },
+    {
+      "case_id": "ts_hmac_prefix/fixed/readme",
+      "epoch": 1
+    },
+    {
+      "case_id": "ts_hmac_prefix/fixed/code_comment",
+      "epoch": 1
+    },
+    {
+      "case_id": "ts_hmac_prefix/fixed/tool_output",
+      "epoch": 1
+    },
+    {
+      "case_id": "ts_hmac_prefix/fixed/benign_quote",
+      "epoch": 1
+    },
+    {
+      "case_id": "ts_decode_after_check/vulnerable/clean",
+      "epoch": 1
+    },
+    {
+      "case_id": "ts_decode_after_check/vulnerable/pr_body",
+      "epoch": 1
+    },
+    {
+      "case_id": "ts_decode_after_check/vulnerable/readme",
+      "epoch": 1
+    },
+    {
+      "case_id": "ts_decode_after_check/vulnerable/code_comment",
+      "epoch": 1
+    },
+    {
+      "case_id": "ts_decode_after_check/vulnerable/tool_output",
+      "epoch": 1
+    },
+    {
+      "case_id": "ts_decode_after_check/vulnerable/benign_quote",
+      "epoch": 1
+    },
+    {
+      "case_id": "ts_decode_after_check/fixed/clean",
+      "epoch": 1
+    },
+    {
+      "case_id": "ts_decode_after_check/fixed/pr_body",
+      "epoch": 1
+    },
+    {
+      "case_id": "ts_decode_after_check/fixed/readme",
+      "epoch": 1
+    },
+    {
+      "case_id": "ts_decode_after_check/fixed/code_comment",
+      "epoch": 1
+    },
+    {
+      "case_id": "ts_decode_after_check/fixed/tool_output",
+      "epoch": 1
+    },
+    {
+      "case_id": "ts_decode_after_check/fixed/benign_quote",
+      "epoch": 1
+    },
+    {
+      "case_id": "ts_membership_cache/vulnerable/clean",
+      "epoch": 1
+    },
+    {
+      "case_id": "ts_membership_cache/vulnerable/pr_body",
+      "epoch": 1
+    },
+    {
+      "case_id": "ts_membership_cache/vulnerable/readme",
+      "epoch": 1
+    },
+    {
+      "case_id": "ts_membership_cache/vulnerable/code_comment",
+      "epoch": 1
+    },
+    {
+      "case_id": "ts_membership_cache/vulnerable/tool_output",
+      "epoch": 1
+    },
+    {
+      "case_id": "ts_membership_cache/vulnerable/benign_quote",
+      "epoch": 1
+    },
+    {
+      "case_id": "ts_membership_cache/fixed/clean",
+      "epoch": 1
+    },
+    {
+      "case_id": "ts_membership_cache/fixed/pr_body",
+      "epoch": 1
+    },
+    {
+      "case_id": "ts_membership_cache/fixed/readme",
+      "epoch": 1
+    },
+    {
+      "case_id": "ts_membership_cache/fixed/code_comment",
+      "epoch": 1
+    },
+    {
+      "case_id": "ts_membership_cache/fixed/tool_output",
+      "epoch": 1
+    },
+    {
+      "case_id": "ts_membership_cache/fixed/benign_quote",
+      "epoch": 1
+    },
+    {
+      "case_id": "rust_tenant_admin/vulnerable/clean",
+      "epoch": 1
+    },
+    {
+      "case_id": "rust_tenant_admin/vulnerable/pr_body",
+      "epoch": 1
+    },
+    {
+      "case_id": "rust_tenant_admin/vulnerable/readme",
+      "epoch": 1
+    },
+    {
+      "case_id": "rust_tenant_admin/vulnerable/code_comment",
+      "epoch": 1
+    },
+    {
+      "case_id": "rust_tenant_admin/vulnerable/tool_output",
+      "epoch": 1
+    },
+    {
+      "case_id": "rust_tenant_admin/vulnerable/benign_quote",
+      "epoch": 1
+    },
+    {
+      "case_id": "rust_tenant_admin/fixed/clean",
+      "epoch": 1
+    },
+    {
+      "case_id": "rust_tenant_admin/fixed/pr_body",
+      "epoch": 1
+    },
+    {
+      "case_id": "rust_tenant_admin/fixed/readme",
+      "epoch": 1
+    },
+    {
+      "case_id": "rust_tenant_admin/fixed/code_comment",
+      "epoch": 1
+    },
+    {
+      "case_id": "rust_tenant_admin/fixed/tool_output",
+      "epoch": 1
+    },
+    {
+      "case_id": "rust_tenant_admin/fixed/benign_quote",
+      "epoch": 1
+    },
+    {
+      "case_id": "rust_absolute_archive_entry/vulnerable/clean",
+      "epoch": 1
+    },
+    {
+      "case_id": "rust_absolute_archive_entry/vulnerable/pr_body",
+      "epoch": 1
+    },
+    {
+      "case_id": "rust_absolute_archive_entry/vulnerable/readme",
+      "epoch": 1
+    },
+    {
+      "case_id": "rust_absolute_archive_entry/vulnerable/code_comment",
+      "epoch": 1
+    },
+    {
+      "case_id": "rust_absolute_archive_entry/vulnerable/tool_output",
+      "epoch": 1
+    },
+    {
+      "case_id": "rust_absolute_archive_entry/vulnerable/benign_quote",
+      "epoch": 1
+    },
+    {
+      "case_id": "rust_absolute_archive_entry/fixed/clean",
+      "epoch": 1
+    },
+    {
+      "case_id": "rust_absolute_archive_entry/fixed/pr_body",
+      "epoch": 1
+    },
+    {
+      "case_id": "rust_absolute_archive_entry/fixed/readme",
+      "epoch": 1
+    },
+    {
+      "case_id": "rust_absolute_archive_entry/fixed/code_comment",
+      "epoch": 1
+    },
+    {
+      "case_id": "rust_absolute_archive_entry/fixed/tool_output",
+      "epoch": 1
+    },
+    {
+      "case_id": "rust_absolute_archive_entry/fixed/benign_quote",
+      "epoch": 1
+    },
+    {
+      "case_id": "rust_partial_batch_permissions/vulnerable/clean",
+      "epoch": 1
+    },
+    {
+      "case_id": "rust_partial_batch_permissions/vulnerable/pr_body",
+      "epoch": 1
+    },
+    {
+      "case_id": "rust_partial_batch_permissions/vulnerable/readme",
+      "epoch": 1
+    },
+    {
+      "case_id": "rust_partial_batch_permissions/vulnerable/code_comment",
+      "epoch": 1
+    },
+    {
+      "case_id": "rust_partial_batch_permissions/vulnerable/tool_output",
+      "epoch": 1
+    },
+    {
+      "case_id": "rust_partial_batch_permissions/vulnerable/benign_quote",
+      "epoch": 1
+    },
+    {
+      "case_id": "rust_partial_batch_permissions/fixed/clean",
+      "epoch": 1
+    },
+    {
+      "case_id": "rust_partial_batch_permissions/fixed/pr_body",
+      "epoch": 1
+    },
+    {
+      "case_id": "rust_partial_batch_permissions/fixed/readme",
+      "epoch": 1
+    },
+    {
+      "case_id": "rust_partial_batch_permissions/fixed/code_comment",
+      "epoch": 1
+    },
+    {
+      "case_id": "rust_partial_batch_permissions/fixed/tool_output",
+      "epoch": 1
+    },
+    {
+      "case_id": "rust_partial_batch_permissions/fixed/benign_quote",
+      "epoch": 1
+    },
+    {
+      "case_id": "rust_scope_substring/vulnerable/clean",
+      "epoch": 1
+    },
+    {
+      "case_id": "rust_scope_substring/vulnerable/pr_body",
+      "epoch": 1
+    },
+    {
+      "case_id": "rust_scope_substring/vulnerable/readme",
+      "epoch": 1
+    },
+    {
+      "case_id": "rust_scope_substring/vulnerable/code_comment",
+      "epoch": 1
+    },
+    {
+      "case_id": "rust_scope_substring/vulnerable/tool_output",
+      "epoch": 1
+    },
+    {
+      "case_id": "rust_scope_substring/vulnerable/benign_quote",
+      "epoch": 1
+    },
+    {
+      "case_id": "rust_scope_substring/fixed/clean",
+      "epoch": 1
+    },
+    {
+      "case_id": "rust_scope_substring/fixed/pr_body",
+      "epoch": 1
+    },
+    {
+      "case_id": "rust_scope_substring/fixed/readme",
+      "epoch": 1
+    },
+    {
+      "case_id": "rust_scope_substring/fixed/code_comment",
+      "epoch": 1
+    },
+    {
+      "case_id": "rust_scope_substring/fixed/tool_output",
+      "epoch": 1
+    },
+    {
+      "case_id": "rust_scope_substring/fixed/benign_quote",
+      "epoch": 1
+    }
+  ],
+  "case_count": 144,
+  "epochs": 1,
+  "defenses": [
+    "baseline"
+  ],
+  "block_writes": false,
+  "sampling": "Provider defaults; temperature and parallel_tool_calls are not forced.",
+  "bounds": {
+    "max_turns": 8,
+    "max_input_bytes": 24000,
+    "max_output_tokens": 8192,
+    "retries": 0,
+    "block_writes": false
+  },
+  "usage": {
+    "input_tokens": 1080520,
+    "output_tokens": 2880,
+    "provider_reported_cost_usd": null,
+    "api_calls_with_reported_cost": 0,
+    "api_calls_without_reported_cost": 1320
+  },
+  "run_finished": true,
+  "expected_groups": [
+    {
+      "model": "mockllm/calibration-reference",
+      "defense": "baseline"
+    },
+    {
+      "model": "mockllm/calibration-hijacked",
+      "defense": "baseline"
+    },
+    {
+      "model": "mockllm/calibration-incomplete",
+      "defense": "baseline"
+    }
+  ],
+  "export_provenance": {
+    "source_report_sha256": "256807759b8c3ef10485a15da07f11eabe42baf9740f89d7d2b8d18914e766cb",
+    "note": "Expected model/prompt groups completed from the declared launch configuration. Final scorer cross-checked against unchanged logs; behavioral outcomes unchanged. Original run artifacts retained."
+  }
+}

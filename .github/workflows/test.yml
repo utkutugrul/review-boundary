@@ -21,7 +21,16 @@ jobs:
         with:
           version: "0.10.2"
           python-version: ${{ matrix.python }}
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "22.23.1"
+      - run: rustup toolchain install 1.93.1 --profile minimal
+      - run: rustup default 1.93.1
       - run: uv sync --frozen --group dev
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run pytest -q
+      - name: Calibrate the full corpus and compare its saved baseline
+        run: |
+          uv run review-boundary demo --split all --mode reference --output runs/ci-reference
+          uv run review-boundary compare examples/baselines/reference-v02.json runs/ci-reference/report.json

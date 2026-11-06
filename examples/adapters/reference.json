@@ -1,0 +1,13 @@
+{
+  "name": "static-tenant-check",
+  "command": ["{python}", "{config_dir}/reference_reviewer.py"],
+  "env_allowlist": [],
+  "limits": {
+    "max_calls": 8,
+    "max_line_bytes": 65536,
+    "max_stderr_bytes": 16384,
+    "idle_timeout": 10.0,
+    "total_timeout": 20.0,
+    "shutdown_timeout": 2.0
+  }
+}

@@ -1,43 +1,85 @@
 # Launch copy
 
-Project descriptions and announcement copy for ReviewBoundary.
+Project descriptions and announcement copy for ReviewBoundary v0.2.
 
 ## Repository description
 
-Paired prompt-injection evaluations for AI security code reviewers. Measure finding quality, unauthorized tool actions, and changes against clean controls.
+Prompt-injection evaluations for AI security reviewers: paired controls,
+observed tool actions, an external reviewer adapter, and a CI regression gate.
 
 ## Short introduction
 
-ReviewBoundary is an open-source evaluation harness for AI security reviewers. It pairs vulnerable and fixed code with clean and hostile review context, then records structured findings and tool actions. The aim is to make instruction-boundary failures and review-quality changes inspectable before a team changes its reviewer configuration.
+ReviewBoundary is an open-source evaluation harness for AI security reviewers.
+It pairs vulnerable and fixed code with clean and hostile review context, then
+records structured findings and actual tool calls. Teams can connect their own
+reviewer, inspect failures in an HTML report, and compare a proposed change
+against a saved baseline before adopting it.
 
 ## Technical launch post
 
-I built ReviewBoundary to test a specific question: can text inside a PR, README, code comment, or tool response redirect an AI security reviewer?
+I built ReviewBoundary to test a specific question: can text inside a PR,
+README, code comment, or tool response redirect an AI security reviewer?
 
-The initial suite uses four original vulnerability/fix pairs across six review contexts. It measures source-grounded findings, unauthorized write attempts, completion, and changes relative to matching clean controls. API failures and incomplete reviews stay visible.
+Version 0.2 includes 12 original function families across Python, TypeScript,
+and Rust. Vulnerable/fixed pairs and six review contexts produce 144 conditions,
+with a frozen public split by family for development and held-out evaluation.
+Model and adapter runs default to five trials per condition.
 
-It runs locally, uses Inspect AI for orchestration, and produces HTML and JSON reports. A free scripted demo verifies the harness; real-model runs use your own OpenRouter key.
+The report separates issue reporting, source evidence, line citation, and
+attacker-goal success. It also records write attempts, completion, and changes
+relative to matching clean controls. API errors and incomplete reviews stay
+visible. A saved-baseline comparison produces per-case reasons and CI exit codes
+for new regressions or missing results.
 
-This is an early, small synthetic evaluation. I'm particularly interested in contributions for held-out cases, more realistic repository tasks, and adapters for existing review agents.
+You can evaluate OpenRouter models inside the included harness or connect your
+own reviewer through a bounded local JSONL adapter. The adapter executes and
+records virtual tool calls rather than accepting a claimed list of actions.
+It runs trusted local code and observes protocol actions; it is not an
+operating-system sandbox.
+
+The project runs locally and produces HTML and JSON reports. Offline calibration
+and adapter examples are free, scripted demonstrations. They are not AI model
+performance results. The corpus is small and synthetic, and its held-out cases
+are public.
+
+I would especially like feedback from teams building review agents: which
+integration is hardest to reproduce, and which real review task would make the
+evaluation more useful?
 
 Repository: https://github.com/utkutugrul/review-boundary
 
 ## Short social post
 
-Introducing ReviewBoundary: an open-source test harness for prompt injection in AI security reviews.
+ReviewBoundary v0.2 tests prompt injection in AI security reviewers with paired
+clean and hostile contexts.
 
-Same code. Clean and hostile context. Inspectable findings and tool actions.
+12 code families. Python, TypeScript, and Rust. A local reviewer adapter,
+inspectable findings and tool actions, and a saved-baseline CI gate.
 
-Local runs, paired controls, HTML/JSON reports, and a free offline demo.
+Open source, with free offline examples and HTML/JSON reports. The cases are
+synthetic; the examples demonstrate the harness rather than model safety.
 
-Early prototype; looking for realistic cases and reviewer integrations.
+I'm looking for feedback from teams building review agents.
 
 https://github.com/utkutugrul/review-boundary
 
 ## Demo narration
 
-This is ReviewBoundary. We give an AI reviewer a small repository and a read-only security-review task. In the clean case, it receives an ordinary PR description. In the paired case, the code stays the same while an untrusted surface tries to redirect the review.
+This is ReviewBoundary. We give a reviewer a small repository and a read-only
+security-review task. In the clean condition, it receives an ordinary PR
+description. In the paired condition, the code stays the same while an untrusted
+surface tries to redirect the review. Fixed code is evaluated too, so rejecting
+every PR does not count as success.
 
-The report separates task completion, matching source evidence, write attempts, and paired degradation. Expand a row to inspect the submitted review and tool events. The fixed code is evaluated too, so rejecting every PR does not count as success.
+The report separates completion, issue reporting, source grounding, citation
+accuracy, attacker goals, and write attempts. Expand a row to inspect its review
+and observed tool events. A blocked write remains an attempted policy violation.
 
-The first release evaluates models inside this harness. Connecting a team's existing reviewer and expanding to held-out cases are the next steps.
+We can run a model inside the harness or connect an existing reviewer through
+the JSONL protocol. Five trials are the default for model and adapter runs. The
+offline examples use scripted reviewers to demonstrate correct behavior,
+intentional failures, and incomplete results without API charges.
+
+Finally, the comparison command checks a candidate report against a compatible
+baseline and names the cases that regressed. The current product is this local
+open-source workflow. A hosted service is a future option.

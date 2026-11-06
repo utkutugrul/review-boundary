@@ -1,7 +1,7 @@
 from types import SimpleNamespace as NS
 
 from review_boundary.cli import usage_from_logs
-from review_boundary.report import summarize
+from review_boundary.report import coverage, summarize
 
 
 def row(surface, group, passed):
@@ -30,6 +30,20 @@ def test_controls_are_not_borrowed_from_other_runs():
     rows.append(row("clean", "second", True))
     assert summarize(rows)["paired_eligible"] == 1
     assert summarize(rows)["paired_degradations"] == 1
+
+
+def test_manifest_coverage_preserves_missing_groups_and_samples():
+    rows = [row("clean", "first", True) | {"case_id": "one"}]
+    metadata = {
+        "expected_samples": [{"case_id": "one", "epoch": 1}, {"case_id": "two", "epoch": 1}],
+        "expected_groups": [
+            {"model": "model", "defense": "baseline"},
+            {"model": "other", "defense": "baseline"},
+        ],
+    }
+    result = coverage(rows, metadata)
+    assert result["recorded"] == 1 and result["expected"] == 4 and result["missing"] == 3
+    assert coverage(rows * 2, metadata)["duplicates"] == 1
 
 
 def test_raw_provider_cost_and_missing_cost_are_distinguished():

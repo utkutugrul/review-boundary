@@ -3,7 +3,9 @@
 import json
 import math
 import os
+from contextlib import contextmanager
 from datetime import UTC, datetime
+from hashlib import sha256
 from pathlib import Path
 from urllib.request import Request, urlopen
 
@@ -25,10 +27,8 @@ def planned_cost(samples, turns, input_bytes, output_tokens, prompt_price, compl
     return math.ceil(cost * RESERVATION_MARGIN * 1_000_000) / 1_000_000
 
 
-def reserve(path: Path, amount: float, limit: float, run_id: str) -> dict:
-    """Reserve before requests; never refund automatically, including failed runs."""
-    if not all(math.isfinite(v) and v > 0 for v in (amount, limit)):
-        raise ValueError("Reservation and budget must be positive finite numbers")
+@contextmanager
+def ledger_lock(path: Path):
     path.parent.mkdir(parents=True, exist_ok=True)
     lock = path.with_suffix(".lock")
     try:
@@ -37,10 +37,28 @@ def reserve(path: Path, amount: float, limit: float, run_id: str) -> dict:
         raise ValueError("Budget ledger is locked; inspect the active run before retrying") from exc
     try:
         os.close(fd)
+        yield
+    finally:
+        lock.unlink(missing_ok=True)
+
+
+def save_ledger(path: Path, data: dict) -> None:
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(json.dumps(data, indent=2) + "\n")
+    os.replace(temporary, path)
+
+
+def reserve(path: Path, amount: float, limit: float, run_id: str) -> dict:
+    """Reserve before requests. Unknown or incomplete billing retains the full reserve."""
+    if not all(math.isfinite(v) and v > 0 for v in (amount, limit)):
+        raise ValueError("Reservation and budget must be positive finite numbers")
+    with ledger_lock(path):
         data = json.loads(path.read_text()) if path.exists() else {"limit_usd": limit, "runs": []}
+        if data.get("billing_overrun"):
+            raise ValueError("Budget ledger has an unresolved provider billing overrun")
         if limit > data["limit_usd"]:
             raise ValueError("This ledger's original limit cannot be raised by a run")
-        total = sum(run["reserved_usd"] for run in data["runs"])
+        total = sum(run.get("settled_usd", run["reserved_usd"]) for run in data["runs"])
         if total + amount > min(limit, data["limit_usd"]):
             raise ValueError(f"Budget exceeded: ${total:.4f} reserved + ${amount:.4f} requested")
         if any(run["id"] == run_id for run in data["runs"]):
@@ -48,16 +66,58 @@ def reserve(path: Path, amount: float, limit: float, run_id: str) -> dict:
         data["runs"].append(
             {"id": run_id, "reserved_usd": amount, "at": datetime.now(UTC).isoformat()}
         )
-        temporary = path.with_suffix(".tmp")
-        temporary.write_text(json.dumps(data, indent=2) + "\n")
-        os.replace(temporary, path)
+        save_ledger(path, data)
         return {
             "reserved_usd": amount,
-            "total_reserved_usd": round(total + amount, 6),
+            "total_accounted_usd": round(total + amount, 6),
             "limit_usd": min(limit, data["limit_usd"]),
         }
-    finally:
-        lock.unlink(missing_ok=True)
+
+
+def settle(path: Path, run_id: str, report_path: Path) -> dict:
+    """Settle a finished run only with complete per-call provider billing evidence."""
+    raw = report_path.read_bytes()
+    report = json.loads(raw)
+    metadata = report["metadata"]
+    usage = metadata.get("usage", {})
+    cost = usage.get("provider_reported_cost_usd")
+    if (
+        metadata.get("run_id") != run_id
+        or metadata.get("run_finished") is not True
+        or usage.get("api_calls_without_reported_cost") != 0
+        or usage.get("api_calls_with_reported_cost", 0) <= 0
+        or isinstance(cost, bool)
+        or not isinstance(cost, (int, float))
+        or not math.isfinite(cost)
+        or cost < 0
+    ):
+        raise ValueError("Settlement requires a finished run and complete provider cost evidence")
+    with ledger_lock(path):
+        data = json.loads(path.read_text())
+        run = next((r for r in data["runs"] if r["id"] == run_id), None)
+        if run is None:
+            raise ValueError("No reservation for this run")
+        proof = {
+            "report_sha256": sha256(raw).hexdigest(),
+            "report_path": str(report_path.resolve()),
+        }
+        if "settled_usd" in run:
+            if (
+                run["settled_usd"] != cost
+                or run["settlement"]["report_sha256"] != proof["report_sha256"]
+            ):
+                raise ValueError("A settled run cannot be revised")
+        else:
+            run.update(settled_usd=cost, settlement=proof, settled_at=datetime.now(UTC).isoformat())
+            if cost > run["reserved_usd"]:
+                data["billing_overrun"] = True
+            save_ledger(path, data)
+        # Persist an unexpected overrun so subsequent requests cannot ignore it.
+        if cost > run["reserved_usd"]:
+            raise ValueError(
+                "Provider cost exceeded the reservation; further runs need investigation"
+            )
+        return {"settled_usd": cost, **proof}
 
 
 def api_get(endpoint: str, key: str | None = None) -> dict:

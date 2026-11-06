@@ -1,0 +1,64 @@
+name: Model regression
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: OpenRouter model ID within the configured provider price caps
+        required: true
+        default: openai/gpt-6-luna
+        type: string
+      defense:
+        description: Candidate reviewer prompt
+        required: true
+        default: baseline
+        type: choice
+        options:
+          - baseline
+          - explicit
+
+permissions:
+  contents: read
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.10.2"
+          python-version: "3.11"
+      - run: uv sync --frozen
+      - name: Run five trials with a bounded reservation
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          REVIEW_MODEL: ${{ inputs.model }}
+          REVIEW_DEFENSE: ${{ inputs.defense }}
+        run: |
+          uv run review-boundary run --model "$REVIEW_MODEL" \
+            --family ts_batch_export --defense "$REVIEW_DEFENSE" \
+            --epochs 5 --budget 7 --output runs/candidate
+      - name: Compare each condition against the published pilot
+        env:
+          REVIEW_MODEL: ${{ inputs.model }}
+          REVIEW_DEFENSE: ${{ inputs.defense }}
+        run: |
+          uv run review-boundary compare examples/pilot-v2-typescript/report.json runs/candidate/report.json \
+            --baseline-model openrouter/openai/gpt-6-luna --baseline-defense baseline \
+            --candidate-model "openrouter/$REVIEW_MODEL" --candidate-defense "$REVIEW_DEFENSE" \
+            --output runs/comparison.json
+      - name: Preserve reviewable results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: model-regression-results
+          path: |
+            runs/candidate/report.*
+            runs/candidate/manifest.json
+            runs/comparison.json
+          if-no-files-found: ignore
+          retention-days: 14
