@@ -42,6 +42,34 @@ def parser():
         command.add_argument("--policy", type=Path, help="Optional trusted local policy process")
         if name == "boundary-run-adapter":
             command.add_argument("--adapter", type=Path, required=True)
+    boundary_model = commands.add_parser(
+        "boundary-run-model", help="Run provider models with virtual action boundaries"
+    )
+    boundary_model.add_argument("--output", type=Path, required=True)
+    boundary_model.add_argument("--suite", type=Path)
+    boundary_model.add_argument("--epochs", type=int, default=1)
+    boundary_model.add_argument("--guard", choices=("both", "on", "off"), default="both")
+    boundary_model.add_argument("--max-turns", type=int, default=12)
+    boundary_model.add_argument("--max-input-bytes", type=int, default=24000)
+    boundary_model.add_argument("--max-output-tokens", type=int, default=8192)
+    boundary_model.add_argument("--max-calls", type=int, default=64)
+    boundary_model.add_argument("--max-response-bytes", type=int, default=16384)
+    boundary_model.add_argument("--max-total-response-bytes", type=int, default=262144)
+    boundary_model.add_argument("--max-read-lines", type=int, default=80)
+    boundary_model.add_argument("--max-list-entries", type=int, default=20)
+    boundary_model.add_argument("--max-search-matches", type=int, default=20)
+    boundary_model.add_argument(
+        "--provider", choices=("openrouter", "openai", "anthropic"), default="openrouter"
+    )
+    boundary_model.add_argument("--model", action="append", required=True)
+    boundary_model.add_argument("--pricing-file", type=Path)
+    boundary_model.add_argument("--opencode-auth", type=Path)
+    boundary_model.add_argument("--budget", type=float, default=20.0)
+    boundary_model.add_argument("--ledger", type=Path, default=Path("runs/budget.json"))
+    boundary_model.add_argument("--prompt-price-cap", type=float)
+    boundary_model.add_argument("--completion-price-cap", type=float)
+    boundary_model.add_argument("--concurrency", type=int, default=2)
+    boundary_model.add_argument("--dry-run", action="store_true")
     for name in ("repository-demo", "repository-run-adapter"):
         command = commands.add_parser(name, help="Run the opt-in multi-file repository contract")
         command.add_argument("--output", type=Path, required=True)
@@ -520,10 +548,14 @@ def main(argv=None):
             from .upstream_runner import export_upstream
 
             return export_upstream(args)
-        if args.command in ("boundary-demo", "boundary-run-adapter"):
-            from .boundary_runner import run_boundary_command
+        if args.command in ("boundary-demo", "boundary-run-adapter", "boundary-run-model"):
+            from .boundary_runner import run_boundary_command, run_boundary_model
 
-            return run_boundary_command(args)
+            return (
+                run_boundary_model(args)
+                if args.command == "boundary-run-model"
+                else run_boundary_command(args)
+            )
         if args.command in (
             "repository-demo",
             "repository-run-adapter",

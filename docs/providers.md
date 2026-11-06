@@ -1,6 +1,6 @@
 # Model providers
 
-ReviewBoundary supports OpenRouter, native OpenAI, and native Anthropic through Inspect's existing providers. Select one provider per run and pass that provider's model IDs. Scoring and corpus versions remain `0.2.0`; adding a provider does not rewrite earlier baselines.
+ReviewBoundary supports OpenRouter, native OpenAI, and native Anthropic through Inspect's existing providers. Select one provider per run and pass that provider's model IDs. The legacy tier remains scoring and corpus version `0.2.0`; repository and boundary modes keep their separate native contracts. Adding a provider does not rewrite earlier baselines.
 
 | Provider | CLI selection | Credential environment variable | Fixed endpoint | Inspect model prefix |
 | --- | --- | --- | --- | --- |
@@ -79,6 +79,24 @@ uv run review-boundary repository-run-model \
 Repository dry runs also avoid credential loading, ledger writes, model
 construction, and output creation. OpenRouter dry runs still validate the
 selected model against the public live catalog.
+
+Action-boundary mode uses the same provider controls and reserves for every
+selected case, guard arm, model, epoch, and bounded generation turn:
+
+```sh
+uv run review-boundary boundary-run-model \
+  --provider anthropic \
+  --model YOUR_NATIVE_MODEL_ID \
+  --pricing-file anthropic-pricing.json \
+  --guard both --epochs 1 \
+  --output runs/boundary-model \
+  --budget 20 --dry-run
+```
+
+Guard arms use matching public inputs and tool schemas but remain independent
+model generations. The native boundary runner supports only the built-in
+exact-grant policy in this release. See [action-boundary mode](boundary-mode.md)
+for attempt accounting, pairing exclusions, and the separate report contract.
 
 ## Request controls and accounting
 

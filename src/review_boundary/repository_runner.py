@@ -312,24 +312,29 @@ def _repository_limits(args) -> RepositoryLimits:
     )
 
 
-def _path_without_symlinks(value: Path, label: str) -> Path:
+def _path_without_symlinks(
+    value: Path, path_label: str, *, runner_label: str = "Repository model"
+) -> Path:
     path = value.expanduser()
     if not path.is_absolute():
         path = Path.cwd() / path
     for component in (*reversed(path.parents), path):
         try:
             if stat.S_ISLNK(component.lstat().st_mode):
-                raise ValueError(f"Repository model {label} must not contain symlinks")
+                raise ValueError(f"{runner_label} {path_label} must not contain symlinks")
         except FileNotFoundError:
             continue
     return path
 
 
-def _repository_model_paths(output_value: Path, ledger_value: Path) -> tuple[Path, Path]:
+def _repository_model_paths(
+    output_value: Path, ledger_value: Path, *, label: str = "Repository model"
+) -> tuple[Path, Path]:
     """Validate every model-run path before the budget ledger or output is written."""
-    output = _path_without_symlinks(output_value, "output")
+    output = _path_without_symlinks(output_value, "output", runner_label=label)
     ledger_paths = tuple(
-        _path_without_symlinks(path, "ledger path") for path in ledger_artifact_paths(ledger_value)
+        _path_without_symlinks(path, "ledger path", runner_label=label)
+        for path in ledger_artifact_paths(ledger_value)
     )
     output_identity = output.resolve(strict=False)
     ledger_identities = tuple(path.resolve(strict=False) for path in ledger_paths)
@@ -352,9 +357,9 @@ def _repository_model_paths(output_value: Path, ledger_value: Path) -> tuple[Pat
             or output_identity.is_relative_to(ledger_identity)
             or ledger_identity in generated
         ):
-            raise ValueError("Repository model output and ledger artifacts must be separate paths")
+            raise ValueError(f"{label} output and ledger artifacts must be separate paths")
     if output.exists() and (not output.is_dir() or any(output.iterdir())):
-        raise ValueError("Repository output must be a new or empty directory")
+        raise ValueError(f"{label} output must be a new or empty directory")
     return output, ledger_paths[0]
 
 

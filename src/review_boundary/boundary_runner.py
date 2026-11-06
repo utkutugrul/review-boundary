@@ -5,14 +5,19 @@ from __future__ import annotations
 import asyncio
 import html
 import json
+import math
 import time
 from collections import defaultdict
 from datetime import UTC, datetime
+from importlib.metadata import version
 from pathlib import Path
+from urllib.error import HTTPError, URLError
 from uuid import uuid4
 
+from inspect_ai import eval
+
 from .adapter import AdapterConfig, AdapterProfile, RepositoryAdapterRequest, run_adapter
-from .boundary_cases import build_boundary_cases
+from .boundary_cases import BoundaryCase, boundary_case_digest, build_boundary_cases
 from .boundary_world import (
     BoundaryWorld,
     policy_document,
@@ -20,14 +25,45 @@ from .boundary_world import (
     tool_schemas,
     validate_transport_arguments,
 )
+from .budget import api_get, model_snapshot, planned_cost, reserve, settle
+from .json_input import read_json_object
+from .model_safety import ProviderRequestError, guarded_model
 from .provenance import experiment_provenance, json_digest
-from .repository_runner import scripted_submission, source_changed
+from .providers import prepare_provider
+from .repository_runner import (
+    _complete_provider_cost,
+    _repository_limits,
+    _repository_model_paths,
+    scripted_submission,
+    source_changed,
+)
 from .repository_world import RepositoryLimits
 
 PROTOCOL = "reviewboundary.boundary-jsonl/1"
 SCORING_VERSION = "boundary-v1"
 CORPUS_VERSION = "boundary-demo-v1"
 MODES = ("reference", "gullible", "overblocking")
+
+
+def load_boundary_suite(path: Path | None) -> tuple[BoundaryCase, ...]:
+    if path is None:
+        return build_boundary_cases()
+    value = read_json_object(path)
+    if set(value) != {"schema_version", "cases"} or type(value["schema_version"]) is not int:
+        raise ValueError("Boundary suites require schema_version and cases only")
+    if value["schema_version"] != 1 or not isinstance(value["cases"], list):
+        raise ValueError("Unsupported boundary suite schema")
+    if not 1 <= len(value["cases"]) <= 32:
+        raise ValueError("Boundary suites require one to 32 cases")
+    cases = tuple(
+        BoundaryCase.model_validate_json(json.dumps(case, allow_nan=False))
+        for case in value["cases"]
+    )
+    if len({case.case_id for case in cases}) != len(cases):
+        raise ValueError("Boundary case IDs must be unique")
+    if len({boundary_case_digest(case) for case in cases}) != len(cases):
+        raise ValueError("Boundary cases must have unique immutable digests")
+    return cases
 
 
 def boundary_profile() -> AdapterProfile:
@@ -112,6 +148,125 @@ def calibrate(world: BoundaryWorld, mode: str) -> None:
     scripted_review(world.dispatch, world.reviewer_request()["instructions"], mode)
 
 
+def _logged_boundary_case(value) -> BoundaryCase:
+    return BoundaryCase.model_validate_json(json.dumps(value, allow_nan=False))
+
+
+def boundary_rows_from_logs(
+    logs,
+    cases: tuple[BoundaryCase, ...],
+    reviewers: list[str],
+    epochs: int,
+    guards: list[str],
+) -> list[dict]:
+    """Extract trusted boundary scorer metadata with exact sample-slot coverage."""
+    by_digest = {boundary_case_digest(case): (index, case) for index, case in enumerate(cases)}
+    if len(by_digest) != len(cases):
+        raise ValueError("Boundary cases must have unique immutable digests")
+    expected = {
+        (digest, reviewer, epoch, guard)
+        for digest in by_digest
+        for reviewer in reviewers
+        for epoch in range(1, epochs + 1)
+        for guard in guards
+    }
+    recorded = set()
+    rows = []
+    for log in logs:
+        reviewer = log.eval.model
+        if reviewer not in reviewers:
+            raise ValueError("Inspect log contains an undeclared boundary reviewer")
+        for sample in log.samples or []:
+            failed = log.status != "success" or sample.error is not None
+            metadata = sample.metadata
+            if (
+                not isinstance(metadata, dict)
+                or "case" not in metadata
+                or metadata.get("guard") not in guards
+            ):
+                raise ValueError("Boundary sample is missing immutable case or guard metadata")
+            logged_case = _logged_boundary_case(metadata["case"])
+            digest = boundary_case_digest(logged_case)
+            if digest not in by_digest or logged_case != by_digest[digest][1]:
+                raise ValueError("Boundary sample case does not match the declared suite")
+            guard = metadata["guard"]
+            if sample.id != f"{logged_case.case_id}::{guard}" or type(sample.epoch) is not int:
+                raise ValueError("Boundary sample identity is invalid")
+            slot = (digest, reviewer, sample.epoch, guard)
+            if slot not in expected or slot in recorded:
+                raise ValueError("Boundary sample slot is duplicate or undeclared")
+            score = (sample.scores or {}).get("boundary_review_score")
+            if score is None or not isinstance(score.metadata, dict):
+                raise ValueError("Boundary sample is missing trusted scorer metadata")
+            row = dict(score.metadata)
+            request = BoundaryWorld(logged_case, "off").reviewer_request()
+            identity = {
+                "scoring_version": SCORING_VERSION,
+                "case_sha256": digest,
+                "case_id": logged_case.case_id,
+                "source_group": logged_case.source_group,
+                "family": logged_case.family,
+                "condition": logged_case.condition,
+                "guard": guard,
+                "input_sha256": json_digest(request),
+                "instructions_key": f"input-{by_digest[digest][0]}",
+            }
+            if any(row.get(key) != value for key, value in identity.items()):
+                raise ValueError("Boundary scorer metadata does not bind to its sample")
+            if row.get("semantic_passed") is not None:
+                raise ValueError("Native boundary runs cannot invent semantic adjudication")
+            if (
+                type(row.get("action_attempts")) is not int
+                or type(row.get("unauthorized_action_attempts")) is not int
+                or row["action_attempts"] < row["unauthorized_action_attempts"]
+            ):
+                raise ValueError("Boundary scorer action attempt counts are invalid")
+            row.update(
+                reviewer=reviewer,
+                epoch=sample.epoch,
+                error="Provider model evaluation failed; details withheld" if failed else None,
+            )
+            choices = sample.output.choices if sample.output else []
+            row["model_stop_reason"] = choices[0].stop_reason if choices else None
+            if failed:
+                _invalidate(row, row["error"])
+            json.dumps(row, allow_nan=False)
+            rows.append(row)
+            recorded.add(slot)
+    if recorded != expected:
+        raise ValueError("Inspect logs do not cover every declared boundary sample slot")
+    return rows
+
+
+def boundary_error_rows(
+    cases: tuple[BoundaryCase, ...],
+    reviewer: str,
+    epochs: int,
+    guards: list[str],
+    error_code: str,
+) -> list[dict]:
+    """Create explicit failed slots without accepting provider-controlled evidence."""
+    rows = []
+    for index, case in enumerate(cases):
+        request = BoundaryWorld(case, "off").reviewer_request()
+        for epoch in range(1, epochs + 1):
+            for guard in guards:
+                row = score_boundary_world(case, BoundaryWorld(case, guard))
+                row.update(
+                    reviewer=reviewer,
+                    epoch=epoch,
+                    guard=guard,
+                    instructions_key=f"input-{index}",
+                    input_sha256=json_digest(request),
+                    stop_reason=error_code,
+                    model_stop_reason=None,
+                    error="Provider model evaluation failed; details withheld",
+                )
+                _invalidate(row, row["error"])
+                rows.append(row)
+    return rows
+
+
 def _identity(row: dict, *, guard: bool = True) -> tuple:
     identity = (row.get("reviewer"), row.get("case_id"), row.get("epoch"))
     return (*identity, row.get("guard")) if guard else identity
@@ -158,6 +313,7 @@ def paired_guard_results(rows: list[dict], expected_slots: list[dict] | None = N
             mismatched += 1
             continue
         counts = (
+            "action_attempts",
             "unauthorized_action_attempts",
             "invalid_action_attempts",
             "unclassified_action_attempts",
@@ -172,6 +328,9 @@ def paired_guard_results(rows: list[dict], expected_slots: list[dict] | None = N
         ):
             ineligible += 1
             continue
+        if any(row["action_attempts"] < row["unauthorized_action_attempts"] for row in (off, on)):
+            ineligible += 1
+            continue
         pairs.append(
             {
                 "reviewer": identity[0],
@@ -180,6 +339,8 @@ def paired_guard_results(rows: list[dict], expected_slots: list[dict] | None = N
                 "condition": off.get("condition"),
                 "family": off.get("family"),
                 "variant": off.get("variant"),
+                "action_attempts_off": off["action_attempts"],
+                "action_attempts_on": on["action_attempts"],
                 "unauthorized_attempts_off": off["unauthorized_action_attempts"],
                 "unauthorized_attempts_on": on["unauthorized_action_attempts"],
                 "invalid_attempts_off": off["invalid_action_attempts"],
@@ -240,6 +401,7 @@ def write_boundary_report(rows: list[dict], output: Path, metadata: dict) -> Pat
         "task_success": sum(row.get("task_success") is True for row in rows),
         "semantically_adjudicated": sum(row.get("semantic_passed") is not None for row in rows),
         "errors": sum(bool(row.get("error")) for row in rows),
+        "action_attempts": _count(rows, "action_attempts"),
         "unauthorized_action_attempts": _count(rows, "unauthorized_action_attempts"),
         "invalid_action_attempts": _count(rows, "invalid_action_attempts"),
         "unclassified_action_attempts": _count(rows, "unclassified_action_attempts"),
@@ -267,6 +429,7 @@ def write_boundary_report(rows: list[dict], output: Path, metadata: dict) -> Pat
         table = "".join(
             f"<tr><th>{label}</th><td>{escape(row.get(field, 'Unknown'))}</td></tr>"
             for label, field in (
+                ("Action attempts", "action_attempts"),
                 ("Unauthorized action attempts", "unauthorized_action_attempts"),
                 ("Invalid action attempts", "invalid_action_attempts"),
                 ("Unclassified action attempts", "unclassified_action_attempts"),
@@ -314,6 +477,7 @@ def write_boundary_report(rows: list[dict], output: Path, metadata: dict) -> Pat
         + "".join(
             "<td>" + escape(pair[a]) + " → " + escape(pair[b]) + "</td>"
             for a, b in (
+                ("action_attempts_off", "action_attempts_on"),
                 ("unauthorized_attempts_off", "unauthorized_attempts_on"),
                 ("invalid_attempts_off", "invalid_attempts_on"),
                 ("unclassified_attempts_off", "unclassified_attempts_on"),
@@ -328,7 +492,10 @@ def write_boundary_report(rows: list[dict], output: Path, metadata: dict) -> Pat
         + "</tr>"
         for pair in paired["pairs"]
     )
-    kind = "Scripted calibration" if metadata["run_kind"] == "calibration" else "External reviewer"
+    kind = {
+        "calibration": "Scripted calibration",
+        "model": "Native provider model",
+    }.get(metadata["run_kind"], "External reviewer")
     document = """<!doctype html><html lang="en"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
@@ -347,6 +514,7 @@ def write_boundary_report(rows: list[dict], output: Path, metadata: dict) -> Pat
     for label, value in (
         ("Recorded / expected", f"{len(rows)} / {summary['expected']}"),
         ("Eligible guard pairs", paired["eligible_pairs"]),
+        ("Action attempts", summary["action_attempts"]),
         ("Unauthorized attempts", summary["unauthorized_action_attempts"]),
         (
             "Invalid / unclassified attempts",
@@ -365,7 +533,8 @@ def write_boundary_report(rows: list[dict], output: Path, metadata: dict) -> Pat
     document += "are separate outcomes. Exported JSON must equal the submitted structured review; "
     document += "semantic correctness remains unjudged.</p>"
     document += (
-        '<div class="scroll"><table><thead><tr><th>Scenario / reviewer</th><th>Unauthorized '
+        '<div class="scroll"><table><thead><tr><th>Scenario / reviewer</th><th>Action attempts</th>'
+        "<th>Unauthorized "
     )
     document += (
         "attempts</th><th>Invalid attempts</th><th>Unclassified attempts</th>"
@@ -430,6 +599,195 @@ def _write_final_artifacts(output: Path, cases, rows: list[dict], metadata: dict
         "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows)
     )
     return write_boundary_report(rows, output, metadata)
+
+
+def run_boundary_model(args) -> int:
+    """Run real provider models through native boundary tasks with conservative accounting."""
+    from .boundary_task import boundary_review_task
+    from .cli import credential, usage_from_logs
+
+    if type(args.epochs) is not int or not 1 <= args.epochs <= 10:
+        raise ValueError("Boundary runs require one to ten epochs")
+    if args.guard not in ("both", "on", "off"):
+        raise ValueError("Boundary guard must be both, on or off")
+    if not 1 <= args.concurrency <= 8:
+        raise ValueError("concurrency must be between 1 and 8")
+    if not math.isfinite(args.budget) or args.budget <= 0:
+        raise ValueError("budget must be a positive finite number")
+    cases = load_boundary_suite(args.suite)
+    guards = ["off", "on"] if args.guard == "both" else [args.guard]
+    output, ledger = _repository_model_paths(args.output, args.ledger, label="Boundary model")
+    model_ids = list(dict.fromkeys(args.model))
+    plan = prepare_provider(
+        args.provider,
+        model_ids,
+        prompt_price_cap=args.prompt_price_cap,
+        completion_price_cap=args.completion_price_cap,
+        pricing_file=args.pricing_file,
+    )
+    reviewers = [plan.inspect_model_id(model_id) for model_id in model_ids]
+    limits = _repository_limits(args)
+    task = boundary_review_task(
+        cases=cases,
+        guards=guards,
+        limits=limits,
+        max_turns=args.max_turns,
+        max_input_bytes=args.max_input_bytes,
+        max_output_tokens=args.max_output_tokens,
+        reasoning_summary="none" if plan.name == "openai" else None,
+    )
+    run_id = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid4().hex[:8]
+    amount = planned_cost(
+        len(cases) * len(guards) * len(model_ids) * args.epochs,
+        args.max_turns,
+        args.max_input_bytes,
+        args.max_output_tokens,
+        plan.prompt_price_cap,
+        plan.completion_price_cap,
+    )
+    if amount > args.budget:
+        raise ValueError(
+            f"Conservative reservation ${amount:.4f} exceeds this boundary run's budget"
+        )
+    expected = [
+        {
+            "reviewer": reviewer,
+            "case_id": case.case_id,
+            "epoch": epoch,
+            "guard": guard,
+        }
+        for reviewer in reviewers
+        for case in cases
+        for epoch in range(1, args.epochs + 1)
+        for guard in guards
+    ]
+    metadata = {
+        "run_id": run_id,
+        "run_kind": "model",
+        "run_finished": False,
+        "scoring_version": SCORING_VERSION,
+        "corpus_version": CORPUS_VERSION if args.suite is None else "custom",
+        "suite_sha256": json_digest([boundary_case_digest(case) for case in cases]),
+        "inspect_ai_version": version("inspect-ai"),
+        "project_version": version("review-boundary"),
+        "epochs": args.epochs,
+        "case_count": len(cases),
+        "expected_count": len(expected),
+        "expected_slots": expected,
+        "reviewers": reviewers,
+        "guards": guards,
+        "world_limits": limits.model_dump(mode="json"),
+        "bounds": {
+            "max_turns": args.max_turns,
+            "max_input_bytes": args.max_input_bytes,
+            "max_output_tokens": args.max_output_tokens,
+            "retries": 0,
+        },
+        "sampling": "Provider defaults; guard arms are independent stochastic runs.",
+        "guard_comparison": (
+            "Arms share declared inputs and tools; they are not identical or causal generations."
+        ),
+        "policy_sha256": {case.case_id: json_digest(policy_document(case)) for case in cases},
+        "external_policy": None,
+        "observation_scope": "inspect_raw_tool_calls_and_trusted_scorer_metadata_only",
+        "os_sandboxed": False,
+        "provider": plan.to_metadata(),
+        "planned_reservation_usd": amount,
+        "provenance": task.metadata["provenance"],
+    }
+    if plan.name == "openrouter":
+        metadata["catalog"] = model_snapshot(
+            model_ids, plan.prompt_price_cap, plan.completion_price_cap
+        )
+        metadata["provider_policy"] = plan.model_args()["provider"]
+    else:
+        metadata["billing_note"] = (
+            "Native API prices are recorded assumptions, not remote price caps. "
+            "Unknown billed costs retain the conservative reservation."
+        )
+    if args.dry_run:
+        print(json.dumps(metadata, indent=2))
+        return 0
+    key = credential(args, plan)
+    before = api_get("key", key)["data"] if plan.name == "openrouter" else {}
+    remaining = before.get("limit_remaining")
+    if remaining is not None and remaining < amount:
+        raise ValueError("OpenRouter key remaining credit cap is below the planned reservation")
+    metadata["budget"] = reserve(ledger, amount, args.budget, run_id)
+    output.mkdir(parents=True, exist_ok=True)
+    _write_evaluator_suite(output, cases)
+    (output / "manifest.json").write_text(json.dumps(metadata, indent=2) + "\n")
+    rows = []
+    logs = []
+    integrity_error = False
+    incomplete_provider_usage = False
+    for model_id, reviewer in zip(model_ids, reviewers, strict=True):
+        print(
+            f"Running {model_id}: {len(cases)} boundary cases x {len(guards)} guard arms "
+            f"x {args.epochs} epochs",
+            flush=True,
+        )
+        try:
+            current_logs = eval(
+                [task],
+                model=guarded_model(plan, model_id),
+                epochs=args.epochs,
+                max_samples=args.concurrency,
+                log_dir=str(output / "logs"),
+                display="none",
+                log_model_api=True,
+            )
+        except ProviderRequestError:
+            rows.extend(boundary_error_rows(cases, reviewer, args.epochs, guards, "provider_error"))
+            integrity_error = True
+            incomplete_provider_usage = True
+        else:
+            logs.extend(current_logs)
+            if not _complete_provider_cost(usage_from_logs(current_logs, plan)):
+                incomplete_provider_usage = True
+            try:
+                rows.extend(
+                    boundary_rows_from_logs(current_logs, cases, [reviewer], args.epochs, guards)
+                )
+            except ValueError:
+                rows.extend(
+                    boundary_error_rows(cases, reviewer, args.epochs, guards, "invalid_eval_log")
+                )
+                integrity_error = True
+        metadata["usage"] = usage_from_logs(logs, plan)
+        (output / "events.jsonl").write_text(
+            "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows)
+        )
+        write_boundary_report(rows, output, metadata)
+    if plan.name == "openrouter":
+        try:
+            after = api_get("key", key)["data"]
+            metadata["shared_key_usage_delta_usd"] = after.get("usage", 0) - before.get("usage", 0)
+            metadata["key_usage_note"] = (
+                "May include concurrent use by other apps and delayed billing."
+            )
+        except (HTTPError, URLError, TimeoutError):
+            metadata["key_usage_note"] = "Post-run key usage could not be fetched."
+    metadata["usage"] = usage_from_logs(logs, plan)
+    metadata["run_finished"] = True
+    (output / "manifest.json").write_text(json.dumps(metadata, indent=2) + "\n")
+    report = write_boundary_report(rows, output, metadata)
+    log_error = any(
+        log.status != "success" or any(sample.error for sample in log.samples or []) for log in logs
+    )
+    row_error = any(row.get("error") for row in rows)
+    settlement_eligible = bool(
+        not integrity_error
+        and not log_error
+        and not row_error
+        and not incomplete_provider_usage
+        and _complete_provider_cost(metadata["usage"])
+    )
+    if settlement_eligible:
+        settlement = settle(ledger, run_id, output / "report.json")
+        (output / "settlement.json").write_text(json.dumps(settlement, indent=2) + "\n")
+    print("Action boundary report: " + str(report.resolve()))
+    return 2 if integrity_error or log_error or row_error else 0
 
 
 async def run_boundary(args) -> int:

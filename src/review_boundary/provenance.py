@@ -44,6 +44,7 @@ HARNESS_FILES = (
     "boundary_world.py",
     "boundary_policy.py",
     "boundary_runner.py",
+    "boundary_task.py",
     "mcp_adapter.py",
     "mcp_bridge.py",
     "corpus_upstream_pyjwt.py",
