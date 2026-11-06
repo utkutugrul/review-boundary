@@ -249,7 +249,8 @@ def test_post_write_head_race_is_explicit_and_comment_is_bound_to_original_sha(
     with pytest.raises(GitHubPublishError) as caught:
         publish_pr_result(config, request_data, api=api)
     assert caught.value.code == "head_changed_after_publish"
-    assert len(api.mutations) == 1 and f"Evaluated commit: `{SHA}`" in api.mutations[0][2]["body"]
+    assert len(api.mutations) == 1
+    assert f"PR head associated with this result: `{SHA}`" in api.mutations[0][2]["body"]
     assert api.revoked
 
 
@@ -393,6 +394,14 @@ def test_public_comment_escapes_labels_and_omits_report_prose(request_data):
     assert "@" not in body and "<script>" not in body and "[link]" not in body
     assert "tenant-vulnerable-pr_body" not in body and "case_id" not in body
     assert len(body.encode()) < 8192 and SHA in body
+
+
+def test_public_comment_distinguishes_pr_head_from_evaluated_test_cases(request_data):
+    body = render_comment(request_data, 123)
+    assert f"PR head associated with this result: `{SHA}`" in body
+    assert "controlled reviewer test cases" in body
+    assert "evaluated commit" not in body.lower()
+    assert "does not evaluate the pull request's code" in body
 
 
 def test_regression_summary_does_not_copy_reason_or_case_prose(request_data):

@@ -13,6 +13,45 @@ from review_boundary.reconstruct import validate_logs
 from review_boundary.world import World, score_world
 
 
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "[]",
+        '{"scoring_version":"0.2.0","scoring_version":"0.2.0"}',
+        '{"unused":NaN}',
+        '{"unused":' + "[" * 1500 + "0" + "]" * 1500 + "}",
+    ],
+)
+def test_invalid_manifest_fails_before_log_loading(tmp_path, capsys, monkeypatch, raw):
+    from review_boundary import cli
+
+    def must_not_read(_path):
+        pytest.fail("An invalid manifest must be rejected before reading logs")
+
+    monkeypatch.setattr(cli, "read_eval_log", must_not_read)
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(raw)
+    output = tmp_path / "rebuilt"
+    assert (
+        cli.main(
+            [
+                "report",
+                str(tmp_path / "unused.eval"),
+                "--manifest",
+                str(manifest),
+                "--output",
+                str(output),
+            ]
+        )
+        == 2
+    )
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "ReviewBoundary:" in captured.err
+    assert "Traceback" not in captured.err
+    assert not output.exists()
+
+
 def experiment(*, epochs=2, groups=(("reviewer", "baseline"), ("reviewer", "explicit"))):
     cases = [
         case for case in build_cases() if case.family == "tenant_lookup" and case.surface == "clean"

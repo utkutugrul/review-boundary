@@ -2,8 +2,9 @@
 
 ReviewBoundary can publish a comparison result as a GitHub App comment on a pull
 request. It creates one App-owned result comment, updates that comment on later
-runs, and leaves an identical result unchanged. The comment names the full
-evaluated commit and shows bounded comparison counts. It does not post raw model
+runs, and leaves an identical result unchanged. The comment names the associated
+PR head and shows bounded comparison counts for controlled reviewer test cases,
+not a scan of the PR's code. It does not post raw model
 findings, grant a GitHub review approval, or merge a pull request.
 
 This is a workflow-driven integration. It needs no hosted webhook receiver.
@@ -71,7 +72,7 @@ without credentials or network access:
 uv run review-boundary github-preview \
   --repository YOUR_OWNER/YOUR_REPOSITORY \
   --pull-number 123 \
-  --expected-head FULL_40_CHARACTER_EVALUATED_COMMIT_SHA \
+  --expected-head FULL_40_CHARACTER_PR_HEAD_SHA \
   --comparison runs/comparison.json \
   --app-id YOUR_NUMERIC_APP_ID \
   --output runs/pr-comment.md
@@ -85,15 +86,15 @@ trusted run metadata:
 uv run --extra github review-boundary github-publish \
   --repository YOUR_OWNER/YOUR_REPOSITORY \
   --pull-number 123 \
-  --expected-head FULL_40_CHARACTER_EVALUATED_COMMIT_SHA \
+  --expected-head FULL_40_CHARACTER_PR_HEAD_SHA \
   --comparison runs/comparison.json \
   --config /absolute/private/path/reporting-app.json
 ```
 
 Each config allowlist entry is an exact `owner/repository` name; wildcards are rejected.
-The example SHA and IDs are placeholders. Use the immutable evaluated commit,
+The example SHA and IDs are placeholders. Use the immutable associated PR head,
 not a branch name, a PR merge ref, or the publication job's own checkout SHA.
-The comparison must come from the trusted evaluator for that commit. The
+The comparison must come from the trusted evaluation run associated with that head. The
 publisher validates its schema and internal counts, but cannot authenticate a
 fabricated artifact's provenance by inspecting JSON alone.
 
@@ -111,7 +112,7 @@ Keep evaluation and publication in separate jobs:
 | Uses a pinned trusted harness to run the approved experiment | Uses a pinned trusted harness to validate and render the resulting comparison |
 | May receive the provider key only for authorized model evaluation | Receives the App PEM only for publication; no model provider key |
 | Never receives the App PEM or installation token | Never checks out, installs, imports, or executes candidate PR code |
-| Emits bounded JSON artifacts and the immutable evaluated commit | Verifies artifact/run provenance, repository, PR number, and expected head from trusted workflow context |
+| Emits bounded JSON artifacts and the associated immutable PR head | Verifies artifact/run provenance, repository, PR number, and expected head from trusted workflow context |
 
 Do not place the App key in a job that runs a reviewer executable supplied by a
 PR, even if that executable is called an adapter. Do not execute PR-controlled

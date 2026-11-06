@@ -41,7 +41,8 @@ operating-system sandbox.
 
 The project runs locally or through a reusable GitHub Actions workflow and produces
 HTML and JSON reports. An optional owner-installed GitHub App posts bounded PR
-summaries for an evaluated commit. Offline calibration
+summaries tied to the associated PR head. These evaluate controlled reviewer
+test cases, not the PR's code. Offline calibration
 and adapter examples are free, scripted demonstrations. They are not AI model
 performance results. The corpus is small and synthetic, and its held-out cases
 are public.

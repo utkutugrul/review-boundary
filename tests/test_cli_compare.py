@@ -167,3 +167,47 @@ def test_cli_group_selectors_are_forwarded(report_files, tmp_path):
     result = json.loads(output.read_text())
     assert result["baseline_group"] == {"model": "test-reviewer", "defense": "baseline"}
     assert result["candidate_group"] == {"model": "changed-reviewer", "defense": "hardened"}
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        '"schema_version": 1,',
+        '"unused": NaN,',
+        '"unused": Infinity,',
+        '"unused": 1e999,',
+        '"unused": ' + "[" * 1500 + "0" + "]" * 1500 + ",",
+    ],
+)
+def test_ambiguous_nonfinite_or_deep_json_is_invalid_input(report_files, tmp_path, capsys, extra):
+    baseline, candidate = report_files
+    candidate.write_text("{" + extra + candidate.read_text()[1:])
+    output = tmp_path / "comparison.json"
+    assert main(["compare", str(baseline), str(candidate), "--output", str(output)]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "ReviewBoundary:" in captured.err
+    assert "Traceback" not in captured.err
+    assert not output.exists()
+
+
+def test_oversized_comparison_input_is_rejected_before_parsing(report_files, capsys):
+    from review_boundary.json_input import MAX_REPORT_BYTES
+
+    baseline, candidate = report_files
+    with candidate.open("r+b") as stream:
+        stream.truncate(MAX_REPORT_BYTES + 1)
+    assert main(["compare", str(baseline), str(candidate)]) == 2
+    assert "32 MiB" in capsys.readouterr().err
+
+
+def test_fifo_comparison_input_is_rejected_without_waiting(report_files, tmp_path, capsys):
+    import os
+
+    if not hasattr(os, "mkfifo"):
+        pytest.skip("Named pipes are unavailable")
+    baseline, _candidate = report_files
+    pipe = tmp_path / "report-pipe"
+    os.mkfifo(pipe)
+    assert main(["compare", str(baseline), str(pipe)]) == 2
+    assert "regular file" in capsys.readouterr().err

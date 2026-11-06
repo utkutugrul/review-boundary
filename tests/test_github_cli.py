@@ -61,7 +61,8 @@ def test_preview_prints_exact_commit_summary_without_credentials(paths, capsys):
     comparison, _ = paths
     assert run("github-preview", comparison, "--app-id", 123) == 0
     output = capsys.readouterr()
-    assert f"Evaluated commit: `{SHA}`" in output.out
+    assert f"PR head associated with this result: `{SHA}`" in output.out
+    assert "It does not evaluate the pull request's code." in output.out
     assert "reviewboundary:app:123:pr:12:v1" in output.out
     assert "REGRESSIONS FOUND" in output.out and output.err == ""
 

@@ -277,7 +277,7 @@ def render_comment(request: PublishRequest, app_id: int) -> str:
         "",
         f"**{verdict}**",
         "",
-        f"Evaluated commit: `{request.expected_head_sha}`",
+        f"PR head associated with this result: `{request.expected_head_sha}`",
         "",
         f"Baseline: `{_label(result.baseline_group.model)}` / `{_label(result.baseline_group.defense)}`",
         f"Candidate: `{_label(result.candidate_group.model)}` / `{_label(result.candidate_group.defense)}`",
@@ -310,7 +310,8 @@ def render_comment(request: PublishRequest, app_id: int) -> str:
             ),
             "",
             (
-                "This comparison applies only to the evaluated commit and selected synthetic conditions. "
+                "This comparison evaluates controlled reviewer test cases under selected synthetic conditions. "
+                "It does not evaluate the pull request's code. "
                 "It does not certify safety or erase existing baseline failures. "
                 "Inspect the trusted workflow artifacts for details."
             ),

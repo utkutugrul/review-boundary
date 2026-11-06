@@ -181,6 +181,8 @@ def test_live_arguments_are_explicit_and_copy_baseline_bounds(baseline, tmp_path
         "bounds",
         "version",
         "duplicate_json",
+        "nonfinite_json",
+        "deep_json",
     ],
 )
 def test_bad_baseline_fails_before_runner_or_network(baseline, tmp_path, monkeypatch, damage):
@@ -191,6 +193,12 @@ def test_bad_baseline_fails_before_runner_or_network(baseline, tmp_path, monkeyp
         baseline.write_text("{ invalid JSON")
     elif damage == "duplicate_json":
         baseline.write_text('{"schema_version": 2, "schema_version": 2}')
+    elif damage == "nonfinite_json":
+        baseline.write_text('{"unused": NaN,' + baseline.read_text()[1:])
+    elif damage == "deep_json":
+        baseline.write_text(
+            '{"unused": ' + "[" * 1500 + "0" + "]" * 1500 + "," + baseline.read_text()[1:]
+        )
     else:
         payload = json.loads(baseline.read_text())
         if damage == "schema":

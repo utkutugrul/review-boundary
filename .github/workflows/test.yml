@@ -30,6 +30,8 @@ jobs:
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run --frozen --all-extras pytest -q
+      - name: Check dashboard data handling
+        run: node --test tests/web/dashboard.test.cjs
       - name: Calibrate the full corpus and compare its saved baseline
         run: |
           uv run review-boundary demo --split all --mode reference --output runs/ci-reference

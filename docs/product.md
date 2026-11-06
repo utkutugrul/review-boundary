@@ -44,7 +44,7 @@ category and file, not proof of semantic understanding.
 | Review policies | Baseline and explicit instruction-boundary prompts, plus optional enforcement that blocks virtual writes |
 | Environment | A finite in-memory repository with four observed tools |
 | Evidence | Structured findings, separate metrics, observed tool events, model-run Inspect logs, and adapter event files |
-| Reports | Portable HTML and machine-readable JSON with visible errors and incomplete samples |
+| Reports | Portable HTML and JSON, plus a local dashboard with run history, filtered cases, and side-by-side clean/hostile reviews |
 | Regression gate | Saved baseline comparison with per-case reasons and CI exit codes |
 | GitHub automation | Reusable Actions evaluation, report artifacts and summaries, plus an optional owner-installed GitHub App for commit-specific PR comments |
 | Offline examples | Scripted harness calibration plus an actual subprocess static checker and an intentionally unsafe adapter control |
@@ -84,6 +84,7 @@ candidate, so teams must review absolute results before accepting a baseline.
 | Operational validation | Evidence from independent users running their own configurations and reviewing failure traces |
 | Optional hosted workflow | Scheduled checks, team history, and shared reports if demand justifies a service |
 
-The shipped product runs locally or through GitHub Actions. The App integration
-requires owner registration, installation, and credentials. A hosted dashboard or
-subscription remains a future option; neither is available today.
+The shipped product runs locally or through GitHub Actions. Its [dashboard](dashboard.md)
+opens saved reports locally in the browser. The App integration requires owner
+registration, installation, and credentials. A hosted service or subscription
+remains a future option; neither is available today.

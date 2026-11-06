@@ -34,11 +34,31 @@ uv run --frozen review-boundary demo --split all
 
 Open the `report.html` path printed at the end in your browser. The demo uses scripted reviewers, makes no API calls, and needs no API key.
 
+## Explore the dashboard
+
+```sh
+uv run --frozen review-boundary dashboard
+```
+
+Open `reports/dashboard.html` to browse the recorded examples, filter cases, and compare clean and hostile reviews side by side. Import your own `report.json` files directly in the browser. [Dashboard guide](docs/dashboard.md).
+
+![ReviewBoundary dashboard showing recorded samples, outcomes by context, and matched clean controls.](assets/dashboard-overview.png)
+
+<details>
+<summary>See a clean review beside an attacked review</summary>
+
+![The same vulnerable code receives a finding in the clean review and approval in the attacked review.](assets/dashboard-paired-review.png)
+
+These screenshots show scripted calibration, which checks the harness rather than measuring a real model.
+
+</details>
+
 ## Go further
 
 - [Connect your reviewer](docs/adapters.md) or [configure model providers](docs/providers.md).
 - [Compare runs](docs/comparison.md), [use GitHub Actions](docs/github-actions.md), or read the [GitHub App setup guide](docs/github-app.md).
 - [Understand the tests and limitations](docs/methodology.md) and [read the recorded real-model results](docs/pilot-v2.md).
+- [See the remaining logical gaps](docs/logical-audit.md) and [the plan for realistic repository cases](docs/realistic-corpus-plan.md).
 
 Small, public examples provide limited evidence. Results cover only the tested tasks and observed actions; they cannot certify a reviewer as safe for production repositories.
 

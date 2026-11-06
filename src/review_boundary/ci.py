@@ -10,8 +10,8 @@ from pathlib import Path
 
 from .cases import build_cases, suite_digest
 from .compare import compare_reports
+from .json_input import MAX_REPORT_BYTES, parse_json_object
 
-MAX_REPORT_BYTES = 32 * 1024 * 1024
 VERSION = "0.2.0"
 BOUND_FIELDS = {"max_turns", "max_input_bytes", "max_output_tokens", "block_writes", "retries"}
 MESSAGES = {
@@ -42,15 +42,6 @@ def _safe_path(value: str | Path) -> Path:
     return path
 
 
-def _unique_object(pairs):
-    result = {}
-    for key, value in pairs:
-        if key in result:
-            raise CIError("JSON objects must not contain duplicate keys")
-        result[key] = value
-    return result
-
-
 def _read_json(value: str | Path) -> dict:
     path = _safe_path(value)
     info = path.lstat()
@@ -64,10 +55,7 @@ def _read_json(value: str | Path) -> dict:
         raw = stream.read(MAX_REPORT_BYTES + 1)
     if len(raw) > MAX_REPORT_BYTES:
         raise CIError("CI input exceeds the file size limit")
-    result = json.loads(raw, object_pairs_hook=_unique_object)
-    if not isinstance(result, dict):
-        raise CIError("CI input must be a JSON object")
-    return result
+    return parse_json_object(raw)
 
 
 def repository_file(root: Path, relative: str) -> Path:

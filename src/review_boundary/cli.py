@@ -92,6 +92,9 @@ def parser():
     compare.add_argument("--output", type=Path)
     for selector in ("baseline-model", "baseline-defense", "candidate-model", "candidate-defense"):
         compare.add_argument("--" + selector)
+    dashboard = commands.add_parser("dashboard", help="Export a self-contained report dashboard")
+    dashboard.add_argument("reports", nargs="*", type=Path)
+    dashboard.add_argument("--output", type=Path, default=Path("reports/dashboard.html"))
     ci = commands.add_parser("ci", help="Reproduce a baseline's cases and check for regressions")
     ci.add_argument("baseline", type=Path)
     ci.add_argument("--output", type=Path, required=True)
@@ -430,6 +433,12 @@ def main(argv=None):
         if args.command == "list":
             print("\n".join(c.id for c in build_cases()))
             return 0
+        if args.command == "dashboard":
+            from .dashboard import default_report_paths, write_dashboard
+
+            output = write_dashboard(args.reports or default_report_paths(), args.output)
+            print(output.resolve())
+            return 0
         if args.command in ("github-preview", "github-publish"):
             from .github_cli import handle_command
 
@@ -455,10 +464,11 @@ def main(argv=None):
                 },
             )
         if args.command == "report":
+            from .json_input import read_json_object
             from .reconstruct import validate_logs
 
+            metadata = read_json_object(args.manifest)
             logs = [read_eval_log(str(p)) for p in args.logs]
-            metadata = json.loads(args.manifest.read_text())
             if metadata.get("scoring_version") != "0.2.0":
                 raise ValueError("Use the original v0.1 runner for historical v0.1 logs")
             validate_logs(logs, metadata)
@@ -472,6 +482,7 @@ def main(argv=None):
             return 0
         if args.command == "compare":
             from .compare import compare_reports, format_comparison
+            from .json_input import read_json_object
 
             if args.output and args.output.resolve() in (
                 args.baseline.resolve(),
@@ -479,8 +490,8 @@ def main(argv=None):
             ):
                 raise ValueError("Comparison output must not overwrite either source report")
             result = compare_reports(
-                json.loads(args.baseline.read_text()),
-                json.loads(args.candidate.read_text()),
+                read_json_object(args.baseline),
+                read_json_object(args.candidate),
                 **{
                     key: getattr(args, key)
                     for key in (
