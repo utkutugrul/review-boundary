@@ -1,6 +1,6 @@
 # Launch copy
 
-Drafts for an optional public announcement. These posts have not been sent to any external channel.
+Project descriptions and announcement copy for ReviewBoundary.
 
 ## Repository description
 
@@ -12,7 +12,7 @@ ReviewBoundary is an open-source evaluation harness for AI security reviewers. I
 
 ## Technical launch post
 
-I'm building ReviewBoundary to test a specific question: can text inside a PR, README, code comment, or tool response redirect an AI security reviewer?
+I built ReviewBoundary to test a specific question: can text inside a PR, README, code comment, or tool response redirect an AI security reviewer?
 
 The initial suite uses four original vulnerability/fix pairs across six review contexts. It measures source-grounded findings, unauthorized write attempts, completion, and changes relative to matching clean controls. API failures and incomplete reviews stay visible.
 
@@ -24,7 +24,7 @@ Repository: https://github.com/utkutugrul/review-boundary
 
 ## Short social post
 
-Building ReviewBoundary: an open-source test harness for prompt injection in AI security reviews.
+Introducing ReviewBoundary: an open-source test harness for prompt injection in AI security reviews.
 
 Same code. Clean and hostile context. Inspectable findings and tool actions.
 
