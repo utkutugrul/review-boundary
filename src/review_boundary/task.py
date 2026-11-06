@@ -195,6 +195,7 @@ def review_boundary(
     max_input_bytes: int = 24000,
     max_output_tokens: int = 8192,
     cases: list[Case] | None = None,
+    reasoning_summary: Literal["none"] | None = None,
 ) -> Task:
     if defense not in ("baseline", "explicit"):
         raise ValueError("defense must be baseline or explicit")
@@ -231,6 +232,7 @@ def review_boundary(
             max_retries=0,
             timeout=90,
             cache_prompt=False,
+            reasoning_summary=reasoning_summary,
         ),
         metadata={
             "suite_sha256": suite_digest(selected),
@@ -239,6 +241,7 @@ def review_boundary(
             "max_turns": max_turns,
             "max_input_bytes": max_input_bytes,
             "max_output_tokens": max_output_tokens,
+            "reasoning_summary": reasoning_summary,
         },
         fail_on_error=False,
     )

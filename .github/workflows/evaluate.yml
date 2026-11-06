@@ -1,0 +1,224 @@
+name: Reusable reviewer evaluation
+
+on:
+  workflow_call:
+    outputs:
+      artifact_id:
+        description: Immutable ID of this evaluation's uploaded report artifact
+        value: ${{ jobs.evaluate.outputs.artifact_id }}
+      comparison_ready:
+        description: Whether a valid comparison was successfully uploaded
+        value: ${{ jobs.evaluate.outputs.comparison_ready }}
+    inputs:
+      mode:
+        description: calibration for free scripted tests, or model for a paid provider run
+        type: string
+        default: calibration
+      provider:
+        type: string
+        default: openrouter
+      model:
+        description: Explicit provider-native model ID for model mode
+        type: string
+        default: ""
+      defense:
+        type: string
+        default: baseline
+      baseline:
+        description: Relative JSON path in the selected data repository
+        type: string
+        default: examples/baselines/reference-v02.json
+      baseline_source:
+        description: harness or caller; caller PR data is read from its base commit
+        type: string
+        default: harness
+      baseline_model:
+        type: string
+        default: ""
+      baseline_defense:
+        type: string
+        default: ""
+      pricing_file:
+        description: Native provider quote JSON in the same repository as the baseline
+        type: string
+        default: ""
+      budget:
+        description: Conservative USD reservation limit for this workflow run
+        type: number
+        default: 20
+      artifact_name:
+        description: Use a unique name for each call within a workflow
+        type: string
+        default: reviewboundary-results
+      publish_comment:
+        description: Publish a commit-specific result with an installed GitHub App
+        type: boolean
+        default: false
+      app_id:
+        type: string
+        default: ""
+      installation_id:
+        type: string
+        default: ""
+    secrets:
+      OPENROUTER_API_KEY:
+        required: false
+      OPENAI_API_KEY:
+        required: false
+      ANTHROPIC_API_KEY:
+        required: false
+      GITHUB_APP_PRIVATE_KEY:
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      comparison_ready: ${{ steps.run.outputs.comparison_ready == 'true' && steps.artifacts.outcome == 'success' }}
+      artifact_id: ${{ steps.artifacts.outputs.artifact-id }}
+    env:
+      RB_SERVER_URL: ${{ github.server_url }}
+      RB_EVENT: ${{ github.event_name }}
+      RB_REPOSITORY: ${{ github.repository }}
+      RB_MODE: ${{ inputs.mode }}
+      RB_PROVIDER: ${{ inputs.provider }}
+      RB_MODEL: ${{ inputs.model }}
+      RB_DEFENSE: ${{ inputs.defense }}
+      RB_BASELINE: ${{ inputs.baseline }}
+      RB_BASELINE_SOURCE: ${{ inputs.baseline_source }}
+      RB_BASELINE_MODEL: ${{ inputs.baseline_model }}
+      RB_BASELINE_DEFENSE: ${{ inputs.baseline_defense }}
+      RB_PRICING_FILE: ${{ inputs.pricing_file }}
+      RB_BUDGET: ${{ inputs.budget }}
+    steps:
+      - name: Require the callee's immutable source context
+        env:
+          SOURCE_REPOSITORY: ${{ job.workflow_repository }}
+          SOURCE_SHA: ${{ job.workflow_sha }}
+        run: |
+          python3 - <<'PY'
+          import os, re
+          assert re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", os.environ["SOURCE_REPOSITORY"])
+          assert re.fullmatch(r"[0-9a-f]{40}", os.environ["SOURCE_SHA"])
+          PY
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: harness
+          persist-credentials: false
+      - name: Reject unsupported events and paid fork evaluations before loading keys
+        run: python3 harness/src/review_boundary/actions.py check
+      - name: Read caller baseline data from the trusted base commit
+        if: inputs.baseline_source == 'caller'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha || github.sha }}
+          path: baseline-source
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.10.2"
+          python-version: "3.11"
+      - run: uv sync --frozen
+        working-directory: harness
+      - name: Evaluate the exact baseline cases and compare results
+        id: run
+        continue-on-error: true
+        working-directory: harness
+        env:
+          OPENROUTER_API_KEY: ${{ inputs.mode == 'model' && inputs.provider == 'openrouter' && secrets.OPENROUTER_API_KEY || '' }}
+          OPENAI_API_KEY: ${{ inputs.mode == 'model' && inputs.provider == 'openai' && secrets.OPENAI_API_KEY || '' }}
+          ANTHROPIC_API_KEY: ${{ inputs.mode == 'model' && inputs.provider == 'anthropic' && secrets.ANTHROPIC_API_KEY || '' }}
+        run: uv run --frozen python -m review_boundary.actions evaluate
+      - name: Add the result to the workflow summary
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          summary = Path("reviewboundary-results/summary.md")
+          content = summary.read_text() if summary.is_file() else "# ReviewBoundary CI\n\n**ERROR**\n\nThe evaluation did not start.\n"
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as stream:
+              stream.write(content)
+          PY
+      - name: Preserve reviewable results
+        id: artifacts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ inputs.artifact_name }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            reviewboundary-results/summary.md
+            reviewboundary-results/ci-result.json
+            reviewboundary-results/comparison.json
+            reviewboundary-results/budget.json
+            reviewboundary-results/candidate/report.*
+            reviewboundary-results/candidate/manifest.json
+            reviewboundary-results/candidate/settlement.json
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Enforce the comparison gate
+        if: always()
+        env:
+          RESULT_CODE: ${{ steps.run.outputs.exit_code }}
+        run: |
+          python3 - <<'PY'
+          import os
+          code = os.environ["RESULT_CODE"]
+          raise SystemExit(int(code) if code in ("0", "1", "2") else 2)
+          PY
+
+  report:
+    needs: evaluate
+    if: >-
+      always() && inputs.publish_comment && needs.evaluate.outputs.comparison_ready == 'true' &&
+      needs.evaluate.outputs.artifact_id != '' &&
+      github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency:
+      group: reviewboundary-comment-${{ github.repository }}-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
+    steps:
+      - name: Require the callee's immutable source context
+        env:
+          SOURCE_REPOSITORY: ${{ job.workflow_repository }}
+          SOURCE_SHA: ${{ job.workflow_sha }}
+        run: |
+          python3 - <<'PY'
+          import os, re
+          assert re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", os.environ["SOURCE_REPOSITORY"])
+          assert re.fullmatch(r"[0-9a-f]{40}", os.environ["SOURCE_SHA"])
+          PY
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: harness
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.10.2"
+          python-version: "3.11"
+      - run: uv sync --frozen --extra github
+        working-directory: harness
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          artifact-ids: ${{ needs.evaluate.outputs.artifact_id }}
+          merge-multiple: true
+          path: reviewboundary-results
+      - name: Publish an App-owned result for the verified PR head
+        working-directory: harness
+        env:
+          RB_SERVER_URL: ${{ github.server_url }}
+          RB_EVENT: ${{ github.event_name }}
+          RB_REPOSITORY: ${{ github.repository }}
+          RB_APP_ID: ${{ inputs.app_id }}
+          RB_INSTALLATION_ID: ${{ inputs.installation_id }}
+          RB_APP_PRIVATE_KEY: ${{ secrets.GITHUB_APP_PRIVATE_KEY }}
+        run: uv run --frozen python -m review_boundary.actions publish

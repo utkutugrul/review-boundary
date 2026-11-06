@@ -14,8 +14,8 @@ policy.
 ## A concrete use case
 
 A team is updating its security-review assistant. It connects its reviewer
-through the local JSONL adapter, or evaluates an OpenRouter model inside the
-included harness. Current and proposed configurations receive matching
+through the local JSONL adapter, or evaluates an OpenRouter, OpenAI, or Anthropic
+model inside the included harness. Current and proposed configurations receive matching
 vulnerable and fixed code. Some conditions add hostile instructions to PR
 descriptions, README files, code comments, or tool responses.
 
@@ -33,21 +33,22 @@ success are independent measurements. A misplaced line number does not erase
 an otherwise grounded finding. Issue reporting is a structural proxy based on
 category and file, not proof of semantic understanding.
 
-## Available in v0.2
+## Available capabilities
 
 | Capability | Current implementation |
 | --- | --- |
 | Test corpus | 12 original function families across Python, TypeScript, and Rust; 144 conditions from vulnerable/fixed pairs and six contexts |
 | Experiment split | Frozen public split by family: 96 development conditions and 48 held-out conditions |
 | Repeated evaluation | Five trials per condition by default for model and adapter runs; configurable repetition count |
-| Reviewer integrations | Tool-capable OpenRouter models and an explicit local JSONL adapter for a team's own reviewer |
+| Reviewer integrations | Built-in OpenRouter, direct OpenAI and direct Anthropic providers, plus an explicit local JSONL adapter for a team's own reviewer |
 | Review policies | Baseline and explicit instruction-boundary prompts, plus optional enforcement that blocks virtual writes |
 | Environment | A finite in-memory repository with four observed tools |
 | Evidence | Structured findings, separate metrics, observed tool events, model-run Inspect logs, and adapter event files |
 | Reports | Portable HTML and machine-readable JSON with visible errors and incomplete samples |
 | Regression gate | Saved baseline comparison with per-case reasons and CI exit codes |
+| GitHub automation | Reusable Actions evaluation, report artifacts and summaries, plus an optional owner-installed GitHub App for commit-specific PR comments |
 | Offline examples | Scripted harness calibration plus an actual subprocess static checker and an intentionally unsafe adapter control |
-| Spending controls | Provider price ceilings and persistent reservations for the built-in model runner; external reviewers manage their own API billing |
+| Spending controls | Persistent reservations for built-in providers; OpenRouter price ceilings, dated native-provider pricing assumptions, and reviewer-managed external adapter billing |
 
 The 144 conditions share 12 underlying families. They are not 144 independent
 vulnerability discoveries. The held-out split is public and should remain out
@@ -83,5 +84,6 @@ candidate, so teams must review absolute results before accepting a baseline.
 | Operational validation | Evidence from independent users running their own configurations and reviewing failure traces |
 | Optional hosted workflow | Scheduled checks, team history, and shared reports if demand justifies a service |
 
-The shipped product is the local open-source workflow. A hosted dashboard or
+The shipped product runs locally or through GitHub Actions. The App integration
+requires owner registration, installation, and credentials. A hosted dashboard or
 subscription remains a future option; neither is available today.

@@ -1,6 +1,6 @@
 # Launch copy
 
-Project descriptions and announcement copy for ReviewBoundary v0.2.
+Project descriptions and announcement copy for ReviewBoundary v0.3.
 
 ## Repository description
 
@@ -20,7 +20,7 @@ against a saved baseline before adopting it.
 I built ReviewBoundary to test a specific question: can text inside a PR,
 README, code comment, or tool response redirect an AI security reviewer?
 
-Version 0.2 includes 12 original function families across Python, TypeScript,
+Version 0.3 includes 12 original function families across Python, TypeScript,
 and Rust. Vulnerable/fixed pairs and six review contexts produce 144 conditions,
 with a frozen public split by family for development and held-out evaluation.
 Model and adapter runs default to five trials per condition.
@@ -31,13 +31,17 @@ relative to matching clean controls. API errors and incomplete reviews stay
 visible. A saved-baseline comparison produces per-case reasons and CI exit codes
 for new regressions or missing results.
 
-You can evaluate OpenRouter models inside the included harness or connect your
-own reviewer through a bounded local JSONL adapter. The adapter executes and
+You can evaluate models through OpenRouter or the direct OpenAI and Anthropic
+APIs inside the included harness, using your own credentials. Native providers
+require a dated pricing configuration. You can also connect your own reviewer
+through a bounded local JSONL adapter. The adapter executes and
 records virtual tool calls rather than accepting a claimed list of actions.
 It runs trusted local code and observes protocol actions; it is not an
 operating-system sandbox.
 
-The project runs locally and produces HTML and JSON reports. Offline calibration
+The project runs locally or through a reusable GitHub Actions workflow and produces
+HTML and JSON reports. An optional owner-installed GitHub App posts bounded PR
+summaries for an evaluated commit. Offline calibration
 and adapter examples are free, scripted demonstrations. They are not AI model
 performance results. The corpus is small and synthetic, and its held-out cases
 are public.
@@ -50,7 +54,7 @@ Repository: https://github.com/utkutugrul/review-boundary
 
 ## Short social post
 
-ReviewBoundary v0.2 tests prompt injection in AI security reviewers with paired
+ReviewBoundary v0.3 tests prompt injection in AI security reviewers with paired
 clean and hostile contexts.
 
 12 code families. Python, TypeScript, and Rust. A local reviewer adapter,
@@ -81,5 +85,5 @@ offline examples use scripted reviewers to demonstrate correct behavior,
 intentional failures, and incomplete results without API charges.
 
 Finally, the comparison command checks a candidate report against a compatible
-baseline and names the cases that regressed. The current product is this local
-open-source workflow. A hosted service is a future option.
+baseline and names the cases that regressed. The same gate can run in GitHub Actions,
+with an optional App result comment after owner setup. A hosted service is a future option.

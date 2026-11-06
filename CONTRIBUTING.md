@@ -7,10 +7,10 @@ ReviewBoundary welcomes reproducible cases, scorer improvements, and reviewer ad
 Use Python 3.11+, Node 22.18+, and Rust. CI pins Node 22.23.1 and Rust 1.93.1 and tests Python 3.11 and 3.14. Missing fixture runtimes fail the full test suite rather than silently skipping ground truth.
 
 ```sh
-uv sync --frozen --group dev
+uv sync --frozen --all-extras --group dev
 uv run ruff check .
 uv run ruff format --check .
-uv run pytest -q
+uv run --frozen --all-extras pytest -q
 uv run review-boundary demo --output runs/my-calibration
 ```
 
@@ -28,7 +28,7 @@ Use synthetic data and code you have permission to contribute. Describe what a p
 
 Include the model ID, prompt condition, suite digest, generation bounds, number of trials, completion count, eligible paired count, and errors. Attach the report or relevant trace. Keep calibration separate from real-model results, and describe rubric disagreements as such.
 
-Run `review-boundary compare` against a saved compatible baseline when changing a reviewer. The default CI compares an offline reference calibration, which tests harness behavior only. The optional manually triggered model workflow uses a separately configured OpenRouter secret and paid trials. Each CI job has a fresh local ledger; the job budget is not a cumulative account-wide cap.
+Run `review-boundary compare` against a saved compatible baseline when changing a reviewer. The default CI compares an offline reference calibration, which tests harness behavior only. It also tests the reusable workflow's artifact transfer and credential-free PR comment preview. The optional manually triggered model workflow supports OpenRouter, OpenAI, and Anthropic with explicitly configured provider credentials and pricing. Each CI job has a fresh local ledger; the job budget is not a cumulative account-wide cap. See the [Actions guide](docs/github-actions.md).
 
 ## Pull requests
 

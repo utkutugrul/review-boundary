@@ -3,62 +3,51 @@ name: Model regression
 on:
   workflow_dispatch:
     inputs:
+      provider:
+        description: Provider whose API key and pricing should be used
+        required: true
+        default: openrouter
+        type: choice
+        options: [openrouter, openai, anthropic]
       model:
-        description: OpenRouter model ID within the configured provider price caps
+        description: Provider-native model ID
         required: true
         default: openai/gpt-6-luna
+        type: string
+      pricing_file:
+        description: Dated quote JSON path in this repo, required for direct providers
+        required: false
+        type: string
+      budget:
+        description: Conservative USD reservation limit for this run
+        default: "7"
         type: string
       defense:
         description: Candidate reviewer prompt
         required: true
         default: baseline
         type: choice
-        options:
-          - baseline
-          - explicit
+        options: [baseline, explicit]
 
 permissions:
   contents: read
 
 jobs:
   evaluate:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
-        with:
-          version: "0.10.2"
-          python-version: "3.11"
-      - run: uv sync --frozen
-      - name: Run five trials with a bounded reservation
-        env:
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          REVIEW_MODEL: ${{ inputs.model }}
-          REVIEW_DEFENSE: ${{ inputs.defense }}
-        run: |
-          uv run review-boundary run --model "$REVIEW_MODEL" \
-            --family ts_batch_export --defense "$REVIEW_DEFENSE" \
-            --epochs 5 --budget 7 --output runs/candidate
-      - name: Compare each condition against the published pilot
-        env:
-          REVIEW_MODEL: ${{ inputs.model }}
-          REVIEW_DEFENSE: ${{ inputs.defense }}
-        run: |
-          uv run review-boundary compare examples/pilot-v2-typescript/report.json runs/candidate/report.json \
-            --baseline-model openrouter/openai/gpt-6-luna --baseline-defense baseline \
-            --candidate-model "openrouter/$REVIEW_MODEL" --candidate-defense "$REVIEW_DEFENSE" \
-            --output runs/comparison.json
-      - name: Preserve reviewable results
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: model-regression-results
-          path: |
-            runs/candidate/report.*
-            runs/candidate/manifest.json
-            runs/comparison.json
-          if-no-files-found: ignore
-          retention-days: 14
+    uses: ./.github/workflows/evaluate.yml
+    with:
+      mode: model
+      provider: ${{ inputs.provider }}
+      model: ${{ inputs.model }}
+      defense: ${{ inputs.defense }}
+      baseline: examples/pilot-v2-typescript/report.json
+      baseline_source: caller
+      baseline_model: openrouter/openai/gpt-6-luna
+      baseline_defense: baseline
+      pricing_file: ${{ inputs.pricing_file }}
+      budget: ${{ fromJSON(inputs.budget) }}
+      artifact_name: model-regression-results
+    secrets:
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

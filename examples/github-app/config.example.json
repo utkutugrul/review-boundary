@@ -1,0 +1,6 @@
+{
+  "app_id": 123456,
+  "installation_id": 654321,
+  "private_key_path": "/absolute/private/path/reviewboundary-app.pem",
+  "allowed_repositories": ["YOUR_OWNER/YOUR_REPOSITORY"]
+}

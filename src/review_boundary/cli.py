@@ -1,8 +1,9 @@
-"""Run offline calibration or a bounded OpenRouter pilot."""
+"""Run calibrations, bounded provider evaluations, and repository integrations."""
 
 import argparse
 import asyncio
 import json
+import math
 import os
 import sys
 from datetime import UTC, datetime
@@ -17,6 +18,8 @@ from inspect_ai.log import read_eval_log
 
 from .budget import api_get, model_snapshot, planned_cost, reserve, settle
 from .cases import FAMILIES, SURFACES, build_cases, suite_digest
+from .model_safety import ProviderRequestError, guarded_model
+from .providers import prepare_provider
 from .report import rows_from_logs, summarize, write_report
 from .task import calibration_model, review_boundary
 
@@ -50,10 +53,18 @@ def parser():
             command.add_argument("--adapter", type=Path, required=True)
         else:
             command.add_argument(
+                "--provider", choices=("openrouter", "openai", "anthropic"), default="openrouter"
+            )
+            command.add_argument(
                 "--model",
                 action="append",
                 required=True,
-                help="OpenRouter model ID, without an openrouter/ prefix",
+                help="Model ID for the selected provider; default provider is OpenRouter",
+            )
+            command.add_argument(
+                "--pricing-file",
+                type=Path,
+                help="Required dated model price configuration for direct providers",
             )
             command.add_argument(
                 "--opencode-auth",
@@ -65,10 +76,10 @@ def parser():
             command.add_argument(
                 "--prompt-price-cap",
                 type=float,
-                default=0.15,
-                help="Maximum provider input price in USD per million tokens",
+                default=None,
+                help="Input price ceiling; OpenRouter defaults to USD 0.15 per million tokens",
             )
-            command.add_argument("--completion-price-cap", type=float, default=0.60)
+            command.add_argument("--completion-price-cap", type=float, default=None)
             command.add_argument("--concurrency", type=int, default=2)
             command.add_argument("--dry-run", action="store_true")
     report = commands.add_parser("report", help="Rebuild an HTML report from Inspect logs")
@@ -81,25 +92,42 @@ def parser():
     compare.add_argument("--output", type=Path)
     for selector in ("baseline-model", "baseline-defense", "candidate-model", "candidate-defense"):
         compare.add_argument("--" + selector)
+    ci = commands.add_parser("ci", help="Reproduce a baseline's cases and check for regressions")
+    ci.add_argument("baseline", type=Path)
+    ci.add_argument("--output", type=Path, required=True)
+    ci.add_argument("--mode", choices=("calibration", "model"), default="calibration")
+    ci.add_argument(
+        "--provider", choices=("openrouter", "openai", "anthropic"), default="openrouter"
+    )
+    ci.add_argument("--model")
+    ci.add_argument("--defense", choices=("baseline", "explicit"), default="baseline")
+    ci.add_argument("--baseline-model")
+    ci.add_argument("--baseline-defense")
+    ci.add_argument("--pricing-file", type=Path)
+    ci.add_argument("--budget", type=float, default=20.0)
+    from .github_cli import add_commands
+
+    add_commands(commands)
     return root
 
 
-def credential(args):
+def credential(args, plan):
     load_dotenv(dotenv_path=Path.cwd() / ".env", override=False)
     if args.opencode_auth:
+        if plan.name != "openrouter":
+            raise ValueError("--opencode-auth is only supported for OpenRouter")
         entry = json.loads(args.opencode_auth.expanduser().read_text()).get("openrouter", {})
         if entry.get("type") != "api" or not entry.get("key"):
             raise ValueError("The selected OpenCode auth file has no OpenRouter API credential")
         os.environ["OPENROUTER_API_KEY"] = entry["key"]
-    key = os.environ.get("OPENROUTER_API_KEY", "").strip()
+    plan.validate_environment(os.environ)
+    key = os.environ.get(plan.api_key_env, "").strip()
     if not key:
-        raise ValueError("Set OPENROUTER_API_KEY or explicitly select --opencode-auth")
-    if os.environ.get("OPENROUTER_BASE_URL"):
-        raise ValueError("Custom OpenRouter base URLs are not supported by this bounded runner")
+        raise ValueError(f"Set {plan.api_key_env} for the selected provider")
     return key
 
 
-def usage_from_logs(logs):
+def usage_from_logs(logs, plan=None):
     usages = [u for log in logs for u in log.stats.model_usage.values()]
     calls = [
         e
@@ -113,16 +141,32 @@ def usage_from_logs(logs):
         response = event.call.response if event.call else None
         usage = response.get("usage") if response else None
         cost = usage.get("cost") if isinstance(usage, dict) else None
-        if isinstance(cost, (float, int)) and cost >= 0:
+        if type(cost) in (float, int) and math.isfinite(cost) and cost >= 0:
             costs.append(cost)
     complete_cost = sum(costs) if calls and len(costs) == len(calls) else None
     return {
         "input_tokens": sum(u.input_tokens for u in usages),
         "output_tokens": sum(u.output_tokens for u in usages),
-        "provider_reported_cost_usd": (
+        "provider_reported_cost_usd": complete_cost,
+        "inspect_cost_estimate_usd": (
             sum(u.total_cost for u in usages)
             if usages and all(u.total_cost is not None for u in usages)
-            else complete_cost
+            else None
+        ),
+        "reservation_rate_cost_estimate_usd": (
+            sum(
+                (
+                    u.input_tokens
+                    + (getattr(u, "input_tokens_cache_read", 0) or 0)
+                    + (getattr(u, "input_tokens_cache_write", 0) or 0)
+                )
+                * plan.prompt_price_cap
+                + u.output_tokens * plan.completion_price_cap
+                for u in usages
+            )
+            / 1_000_000
+            if plan is not None and usages
+            else None
         ),
         "api_calls_with_reported_cost": len(costs),
         "api_calls_without_reported_cost": len(calls) - len(costs),
@@ -200,13 +244,17 @@ async def adapter_run(args, cases, defenses, output, metadata):
     return 2 if any(r["error"] for r in rows) else 0
 
 
-def run(args):
-    cases = [
-        c
-        for c in build_cases(split=args.split, language=args.language)
-        if (not args.family or c.family in args.family)
-        and (not args.surface or c.surface in args.surface)
-    ]
+def run(args, cases_override=None):
+    cases = (
+        cases_override
+        if cases_override is not None
+        else [
+            c
+            for c in build_cases(split=args.split, language=args.language)
+            if (not args.family or c.family in args.family)
+            and (not args.surface or c.surface in args.surface)
+        ]
+    )
     defenses = list(dict.fromkeys(args.defense or ["baseline"]))
     if not 1 <= args.epochs <= 20:
         raise ValueError("epochs must be between 1 and 20")
@@ -218,6 +266,9 @@ def run(args):
             max_input_bytes=args.max_input_bytes,
             max_output_tokens=args.max_output_tokens,
             cases=cases,
+            reasoning_summary="none"
+            if args.command == "run" and args.provider == "openai"
+            else None,
         )
         for d in defenses
     ]
@@ -254,46 +305,52 @@ def run(args):
         },
     }
     logs = []
+    plan = None
     if args.command == "run-adapter":
         return asyncio.run(adapter_run(args, cases, defenses, output, metadata))
     if args.command == "run":
         if not 1 <= args.concurrency <= 8:
             raise ValueError("concurrency must be between 1 and 8")
         model_ids = list(dict.fromkeys(args.model))
+        plan = prepare_provider(
+            args.provider,
+            model_ids,
+            prompt_price_cap=args.prompt_price_cap,
+            completion_price_cap=args.completion_price_cap,
+            pricing_file=args.pricing_file,
+        )
+        metadata["provider"] = plan.to_metadata()
         metadata["expected_groups"] = [
-            {"model": "openrouter/" + m, "defense": d} for m in model_ids for d in defenses
+            {"model": plan.inspect_model_id(m), "defense": d} for m in model_ids for d in defenses
         ]
         amount = planned_cost(
             len(cases) * len(defenses) * len(model_ids) * args.epochs,
             args.max_turns,
             args.max_input_bytes,
             args.max_output_tokens,
-            args.prompt_price_cap,
-            args.completion_price_cap,
+            plan.prompt_price_cap,
+            plan.completion_price_cap,
         )
         if amount > args.budget:
             raise ValueError(
                 f"Conservative reservation ${amount:.4f} exceeds this run's budget; select a smaller --family/--surface suite"
             )
-        metadata["catalog"] = model_snapshot(
-            model_ids, args.prompt_price_cap, args.completion_price_cap
-        )
-        provider = {
-            "require_parameters": True,
-            "allow_fallbacks": False,
-            "max_price": {
-                "prompt": args.prompt_price_cap,
-                "completion": args.completion_price_cap,
-                "request": 0,
-            },
-        }
-        metadata["provider_policy"] = provider
+        if plan.name == "openrouter":
+            metadata["catalog"] = model_snapshot(
+                model_ids, plan.prompt_price_cap, plan.completion_price_cap
+            )
+            metadata["provider_policy"] = plan.model_args()["provider"]
+        else:
+            metadata["billing_note"] = (
+                "Native API prices are recorded assumptions, not remote price caps. "
+                "Token-based estimates are not invoices; unknown billed costs retain reservations."
+            )
         metadata["planned_reservation_usd"] = amount
         if args.dry_run:
             print(json.dumps(metadata, indent=2))
             return 0
-        key = credential(args)
-        before = api_get("key", key)["data"]
+        key = credential(args, plan)
+        before = api_get("key", key)["data"] if plan.name == "openrouter" else {}
         remaining = before.get("limit_remaining")
         if remaining is not None and remaining < amount:
             raise ValueError("OpenRouter key remaining credit cap is below the planned reservation")
@@ -304,8 +361,7 @@ def run(args):
             print(f"Running {model_id}: {len(cases)} cases x {len(defenses)} prompts", flush=True)
             new = eval(
                 tasks,
-                model="openrouter/" + model_id,
-                model_args={"provider": provider, "stream": False},
+                model=guarded_model(plan, model_id),
                 epochs=args.epochs,
                 max_samples=args.concurrency,
                 log_dir=str(output / "logs"),
@@ -313,17 +369,20 @@ def run(args):
                 log_model_api=True,
             )
             logs.extend(new)
-            metadata["usage"] = usage_from_logs(logs)
+            metadata["usage"] = usage_from_logs(logs, plan)
             write_report(rows_from_logs(logs), output, metadata)
             print(json.dumps(summarize(rows_from_logs(new))), flush=True)
-        try:
-            after = api_get("key", key)["data"]
-            metadata["shared_key_usage_delta_usd"] = after.get("usage", 0) - before.get("usage", 0)
-            metadata["key_usage_note"] = (
-                "May include concurrent use by other apps and delayed billing."
-            )
-        except (HTTPError, URLError, TimeoutError):
-            metadata["key_usage_note"] = "Post-run key usage could not be fetched."
+        if plan.name == "openrouter":
+            try:
+                after = api_get("key", key)["data"]
+                metadata["shared_key_usage_delta_usd"] = after.get("usage", 0) - before.get(
+                    "usage", 0
+                )
+                metadata["key_usage_note"] = (
+                    "May include concurrent use by other apps and delayed billing."
+                )
+            except (HTTPError, URLError, TimeoutError):
+                metadata["key_usage_note"] = "Post-run key usage could not be fetched."
     else:
         modes = list(dict.fromkeys(args.mode or ["reference", "hijacked", "incomplete"]))
         metadata["expected_groups"] = [
@@ -344,7 +403,7 @@ def run(args):
                 )
             )
     rows = rows_from_logs(logs)
-    metadata["usage"] = usage_from_logs(logs)
+    metadata["usage"] = usage_from_logs(logs, plan)
     metadata["run_finished"] = True
     output.mkdir(parents=True, exist_ok=True)
     (output / "manifest.json").write_text(json.dumps(metadata, indent=2) + "\n")
@@ -371,6 +430,30 @@ def main(argv=None):
         if args.command == "list":
             print("\n".join(c.id for c in build_cases()))
             return 0
+        if args.command in ("github-preview", "github-publish"):
+            from .github_cli import handle_command
+
+            return handle_command(args)
+        if args.command == "ci":
+            from .ci import run_ci
+
+            return run_ci(
+                args.baseline,
+                args.output,
+                **{
+                    name: getattr(args, name)
+                    for name in (
+                        "mode",
+                        "provider",
+                        "model",
+                        "defense",
+                        "baseline_model",
+                        "baseline_defense",
+                        "pricing_file",
+                        "budget",
+                    )
+                },
+            )
         if args.command == "report":
             from .reconstruct import validate_logs
 
@@ -414,7 +497,7 @@ def main(argv=None):
             print(format_comparison(result))
             return result["exit_code"]
         return run(args)
-    except (ValueError, OSError, HTTPError, URLError) as exc:
+    except (ValueError, OSError, HTTPError, URLError, ProviderRequestError) as exc:
         # Do not dump SDK objects, request headers, auth files or full tracebacks here.
         print(f"ReviewBoundary: {exc}", file=sys.stderr)
         return 2

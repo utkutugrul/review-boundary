@@ -1,0 +1,15 @@
+{
+  "name": "ReviewBoundary Reporter",
+  "url": "https://github.com/utkutugrul/review-boundary",
+  "description": "Publish bounded ReviewBoundary comparison summaries from a trusted reporting workflow.",
+  "hook_attributes": {
+    "url": "https://example.invalid/reviewboundary-disabled",
+    "active": false
+  },
+  "public": false,
+  "default_permissions": {
+    "pull_requests": "write"
+  },
+  "default_events": [],
+  "request_oauth_on_install": false
+}
