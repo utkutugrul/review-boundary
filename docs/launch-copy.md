@@ -1,6 +1,6 @@
 # Launch copy
 
-Drafts for publication after the repository URL and release are available. Nothing in this file has been posted.
+Drafts for an optional public announcement. These posts have not been sent to any external channel.
 
 ## Repository description
 
@@ -20,7 +20,7 @@ It runs locally, uses Inspect AI for orchestration, and produces HTML and JSON r
 
 This is an early, small synthetic evaluation. I'm particularly interested in contributions for held-out cases, more realistic repository tasks, and adapters for existing review agents.
 
-Repository: [insert published repository URL]
+Repository: https://github.com/utkutugrul/review-boundary
 
 ## Short social post
 
@@ -32,7 +32,7 @@ Local runs, paired controls, HTML/JSON reports, and a free offline demo.
 
 Early prototype; looking for realistic cases and reviewer integrations.
 
-[insert published repository URL]
+https://github.com/utkutugrul/review-boundary
 
 ## Demo narration
 

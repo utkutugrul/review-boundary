@@ -1,8 +1,9 @@
 {
   "name": "review-boundary",
   "display_name": "ReviewBoundary",
+  "repository_url": "https://github.com/utkutugrul/review-boundary",
   "description": "Paired prompt-injection evaluations for AI security code reviewers. Measure finding quality, unauthorized tool actions, and changes against clean controls.",
   "topics": ["ai-security", "prompt-injection", "llm-evaluation", "code-review", "red-teaming", "inspect-ai", "security-testing"],
   "hero_asset": "assets/review-boundary-hero.png",
-  "status": "Local prototype. Repository publication and hosted service are not yet available."
+  "status": "Public open-source prototype. See the product brief for current capabilities and roadmap."
 }

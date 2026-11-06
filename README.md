@@ -4,6 +4,8 @@
 
 **Stress-test AI security reviewers.**
 
+[![Tests](https://github.com/utkutugrul/review-boundary/actions/workflows/test.yml/badge.svg)](https://github.com/utkutugrul/review-boundary/actions/workflows/test.yml)
+
 [Quick start](#use-the-prototype) · [Pilot results](docs/pilot.md) · [Methodology](docs/methodology.md) · [Product direction](docs/product.md) · [Contributing](CONTRIBUTING.md)
 
 An open-source prototype by Utku Tugrul for teams developing AI code review tools. Run controlled security-review tasks, add prompt injections, and inspect changes in findings and tool actions before changing a model or reviewer prompt.
@@ -19,6 +21,8 @@ The suite has four original vulnerability families: tenant authorization, missin
 Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
 
 ```sh
+git clone https://github.com/utkutugrul/review-boundary.git
+cd review-boundary
 uv sync --frozen --group dev
 uv run review-boundary list
 uv run review-boundary demo --output runs/demo

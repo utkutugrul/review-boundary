@@ -11,6 +11,10 @@ requires-python = ">=3.11"
 authors = [{name = "Utku Tugrul"}]
 dependencies = ["inspect-ai>=0.3.287,<0.4", "openai", "pydantic>=2,<3", "python-dotenv"]
 
+[project.urls]
+Repository = "https://github.com/utkutugrul/review-boundary"
+Issues = "https://github.com/utkutugrul/review-boundary/issues"
+
 [project.scripts]
 review-boundary = "review_boundary.cli:main"
 
