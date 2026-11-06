@@ -1,0 +1,29 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "review-boundary"
+version = "0.1.0"
+description = "Paired behavioral evaluations of prompt injection in AI security reviews"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{name = "Utku Tugrul"}]
+dependencies = ["inspect-ai>=0.3.287,<0.4", "openai", "pydantic>=2,<3", "python-dotenv"]
+
+[project.scripts]
+review-boundary = "review_boundary.cli:main"
+
+[dependency-groups]
+dev = ["pytest", "pytest-asyncio", "ruff"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/review_boundary"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+

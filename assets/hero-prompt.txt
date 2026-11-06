@@ -1,0 +1,14 @@
+Generated with the built-in image_gen tool. Original output preserved; project copy unedited.
+
+Use case: ads-marketing
+Asset type: GitHub README hero and social preview for an open-source developer tool.
+Primary request: Create a refined, memorable English brand cover for ReviewBoundary, an evaluation harness that tests whether AI security code reviewers follow malicious instructions embedded in PRs and repository content.
+Format: Wide landscape, approximately 2:1 composition, crisp and suitable for a repository cover. Leave safe margins around all typography.
+Scene: Deep ink-navy background with a subtle technical grid. Two precise parallel paths carry matching small code-review panels toward a thin luminous mint boundary. One path carries an additional amber instruction fragment from outside the trusted path. The visual should suggest a controlled paired experiment and an instruction boundary, without implying any actual test result.
+Style: Premium editorial technical illustration, restrained geometric forms, fine linework, a little tactile depth, abundant negative space. Calm research-tool identity. Mint and ivory accents with a small amber contrast.
+Text, verbatim and spelled accurately: "ReviewBoundary"
+Subtitle, verbatim: "Stress-test AI security reviewers."
+Small kicker, verbatim: "OPEN SOURCE EVALUATION HARNESS"
+Typography: Large readable modern sans-serif title, elegant hierarchy, clean English only.
+Constraints: No numerical scores, no fabricated dashboard results, no company logos, no shields, locks, hooded hackers, robots, glossy neon cyberpunk scenery or watermark. This is a conceptual brand image, not a screenshot.
+
