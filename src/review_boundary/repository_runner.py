@@ -218,7 +218,13 @@ async def run_repository(args) -> int:
         if config
         else "Scripted calibration. No model API calls or model-performance claims.",
         "provenance": experiment_provenance(
-            {f"input-{i}": case.instructions for i, case in enumerate(cases)},
+            {
+                f"input-{i}": json.dumps(
+                    {"instructions": case.instructions, "task": case.task},
+                    sort_keys=True,
+                )
+                for i, case in enumerate(cases)
+            },
             tool_schemas(),
             protocol=PROTOCOL,
             reviewer_source=source,
@@ -226,21 +232,35 @@ async def run_repository(args) -> int:
     }
     if config:
         metadata["adapter"] = {**config.to_metadata(), "protocol": PROTOCOL}
-    output.mkdir(parents=True, exist_ok=True)
-    (output / "suite.json").write_text(
-        json.dumps(
-            {"schema_version": 1, "cases": [case.model_dump(mode="json") for case in cases]},
-            indent=2,
-        )
-        + "\n"
-    )
+    suite = {
+        "schema_version": 1,
+        "cases": [case.model_dump(mode="json") for case in cases],
+    }
     rows = []
     manifest = output / "manifest.json"
-    manifest.write_text(json.dumps(metadata, indent=2) + "\n")
+
+    def persist_adapter_artifacts() -> None:
+        """Persist buffered evaluator material only after adapter execution stops."""
+        output.mkdir(parents=True, exist_ok=True)
+        (output / "suite.json").write_text(json.dumps(suite, indent=2) + "\n")
+        manifest.write_text(json.dumps(metadata, indent=2) + "\n")
+        if rows:
+            (output / "events.jsonl").write_text(
+                "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows)
+            )
+            write_repository_report(rows, output, metadata)
+
+    # An external adapter is not sandboxed. Keep all evaluator-derived
+    # artifacts out of its filesystem view until every invocation has ended.
+    if not config:
+        output.mkdir(parents=True, exist_ok=True)
+        (output / "suite.json").write_text(json.dumps(suite, indent=2) + "\n")
+        manifest.write_text(json.dumps(metadata, indent=2) + "\n")
     for mode in modes:
         for index, case in enumerate(cases):
             for epoch in range(1, args.epochs + 1):
                 if config and source_changed(config, source):
+                    persist_adapter_artifacts()
                     raise ValueError("Declared reviewer source changed before the next invocation")
                 world = RepositoryWorld(case)
                 result = None
@@ -281,14 +301,20 @@ async def run_repository(args) -> int:
                         error="Declared reviewer source changed during the evaluation",
                     )
                 rows.append(row)
-                with (output / "events.jsonl").open("a") as stream:
-                    stream.write(json.dumps(row, ensure_ascii=False) + "\n")
-                write_repository_report(rows, output, metadata)
+                if not config:
+                    with (output / "events.jsonl").open("a") as stream:
+                        stream.write(json.dumps(row, ensure_ascii=False) + "\n")
+                    write_repository_report(rows, output, metadata)
                 if changed:
+                    persist_adapter_artifacts()
                     raise ValueError(row["error"])
     metadata["run_finished"] = True
-    manifest.write_text(json.dumps(metadata, indent=2) + "\n")
-    report = write_repository_report(rows, output, metadata)
+    if config:
+        persist_adapter_artifacts()
+        report = output / "report.html"
+    else:
+        manifest.write_text(json.dumps(metadata, indent=2) + "\n")
+        report = write_repository_report(rows, output, metadata)
     print("Repository evidence report: " + str(report.resolve()))
     return 2 if any(row["error"] for row in rows) else 0
 

@@ -2,9 +2,10 @@
 
 Repository mode lets a reviewer follow evidence across several files in a bounded
 virtual snapshot. It currently includes an original synthetic tenant-access
-example and a connection for a trusted external reviewer. **No upstream security
-cases have been implemented or reproduced.** The [candidate research](upstream-candidates.md)
-describes future intake work.
+example and a connection for a trusted external reviewer. An optional
+[pinned PyJWT corpus](upstream-pyjwt.md) adds four conditions from one independently
+reproduced upstream source issue. The [candidate research](upstream-candidates.md)
+tracks further intake work.
 
 ## Try the offline demo
 
@@ -96,6 +97,10 @@ A submitted review uses `approve` or `request_changes`. Each finding has
 `category`, `summary`, and one to eight evidence spans containing `path`,
 `start_line`, `end_line`, and an exact `excerpt`; `symbol` is optional. Up to
 12 findings are accepted. Cite source text without adding line-number prefixes.
+The tool schema publishes the shared category vocabulary, including
+`authorization` and `algorithm_confusion`. It does not disclose which category,
+if any, is expected for a particular case; additional lowercase snake-case
+labels remain available for other findings.
 
 ## What the scores establish
 
@@ -148,3 +153,8 @@ The external process is trusted local code and can access host files or the
 network independently. Keep complete suites and evaluator artifacts outside
 reviewer inputs. Only protocol tool actions are observed, and external reviewer
 billing is not managed by this runner.
+
+During an external run, suite, manifest, event, and report files are buffered
+until all reviewer processes have ended. Later invocations therefore cannot read
+earlier evaluator outcomes from the output directory. This is invocation
+isolation for the runner's artifacts, not host-level sandboxing.

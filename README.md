@@ -22,6 +22,11 @@ You get a browser report showing what happened in each test, plus JSON results f
 2. Repeat the review with misleading instructions in pull requests, files, comments, or tool responses. These attempts are called **prompt injection**.
 3. Compare the findings and actions with the ordinary review and a saved baseline.
 
+New [action-boundary scenarios](docs/boundary-mode.md) test fake approval messages in
+file paths and URLs, actions aimed at the wrong destination, vague permission, and
+instructions to hide findings. Each has a normal-use control. Compare a guard on
+and off while tracking attempted actions, blocked actions, and review quality separately.
+
 ## Try the free demo
 
 Install Git, Python 3.11+, and [uv](https://docs.astral.sh/uv/), then run:
@@ -66,7 +71,7 @@ These screenshots show scripted calibration, which checks the harness rather tha
 - [Connect your reviewer](docs/adapters.md) or [configure model providers](docs/providers.md).
 - [Compare runs](docs/comparison.md), [use GitHub Actions](docs/github-actions.md), or read the [GitHub App setup guide](docs/github-app.md).
 - [Understand the tests and limitations](docs/methodology.md) and [read the recorded real-model results](docs/pilot-v2.md).
-- [Understand experiment records](docs/experiment-records.md) and [review upstream case candidates](docs/upstream-candidates.md).
+- [Understand experiment records](docs/experiment-records.md), inspect the [verified upstream case](docs/upstream-pyjwt.md), or [review further candidates](docs/upstream-candidates.md).
 - [See the remaining logical gaps](docs/logical-audit.md) and [the plan for realistic repository cases](docs/realistic-corpus-plan.md).
 
 Small, public examples provide limited evidence. Results cover only the tested tasks and observed actions; they cannot certify a reviewer as safe for production repositories.

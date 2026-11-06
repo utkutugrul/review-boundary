@@ -1,14 +1,15 @@
 # Upstream case candidates
 
-Source verification: November 6, 2026. **Zero upstream cases have been implemented
-or reproduced in ReviewBoundary.** This was source inspection only: no upstream
-code was executed, dependencies installed, or paid models called.
+Source verification: November 6, 2026. **One upstream source issue is now
+implemented and reproduced:** the [pinned PyJWT corpus](upstream-pyjwt.md), with
+four conditions and independent behavior controls. The other five entries
+remain source-researched candidates. No paid model evaluation was performed.
 
 The official advisories, selected commit objects, parent arrays, and pinned
 license files were inspected. Commit links below contain full immutable SHAs.
 A parent is a candidate comparison revision, not a demonstrated vulnerable
-baseline. Every behavior check below remains **unverified here**, including
-tests already present upstream.
+baseline. Except for the documented PyJWT reproduction, behavior checks below
+remain **unverified here**, including tests already present upstream.
 
 | Priority / candidate | Advisory and verified history | Narrow scope and behavior check to validate | Pinned license |
 | --- | --- | --- | --- |
@@ -44,17 +45,18 @@ not cover the separate `parse_urls` path, according to its
 Repository licenses do not settle every copied test, dependency, or data file;
 preserve notices and record per-file exceptions before redistribution.
 
-The first two intake steps are:
+The next intake steps are:
 
-1. Prepare evaluator-only manifests for **PyJWT and Next.js** with both pinned
+1. Prepare an evaluator-only manifest for **Next.js** with both pinned
    revisions, file hashes, dependency locks, license inventories, and the minimal
    call graph. Keep advisories, reference patches, and oracle tests outside the
    reviewer-visible snapshot. Treat aliases and backports as one source issue.
-2. Build isolated behavior checks for PyJWT first, then Next.js in its full
-   runtime. Require the selected pre-fix revision to fail the target check, the
+2. Extend the PyJWT pilot's human rubric validation and build Next.js behavior
+   checks in its full runtime. Require the pre-fix revision to fail the target check, the
    fix to pass it, and ordinary behavior to pass on both. Only then validate a
    reduced slice. Queue zip2 next, explicitly selecting a merge parent and checking
    normal files alongside both containment tests.
 
 Admission remains governed by the [realistic corpus plan](realistic-corpus-plan.md).
-These are candidates, not a six-case benchmark or evidence of model performance.
+The PyJWT pilot is admitted; the remaining entries are candidates. This is not
+a six-issue benchmark or evidence of model performance.

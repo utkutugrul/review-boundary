@@ -19,6 +19,8 @@ from .repository_cases import (
     virtual_path,
 )
 
+MAX_REVIEW_BYTES = 32768
+
 
 class RepositoryEvidence(EvidenceRange):
     excerpt: str = Field(min_length=1, max_length=8192)
@@ -30,7 +32,14 @@ class RepositoryEvidence(EvidenceRange):
 
 
 class RepositoryFinding(FrozenModel):
-    category: str = Field(pattern=r"^[a-z][a-z0-9_]{0,63}$")
+    category: str = Field(
+        pattern=r"^[a-z][a-z0-9_]{0,63}$",
+        description=(
+            "Use authorization for access-control or tenant-boundary findings and "
+            "algorithm_confusion for cryptographic algorithm or key-confusion findings. "
+            "Other lowercase snake_case labels are allowed for additional findings."
+        ),
+    )
     summary: str = Field(min_length=1, max_length=2000)
     evidence: tuple[RepositoryEvidence, ...] = Field(min_length=1, max_length=8)
 
@@ -46,8 +55,8 @@ class RepositoryReview(FrozenModel):
 
     @model_validator(mode="after")
     def bounded_review(self):
-        if len(self.model_dump_json().encode()) > 32768:
-            raise ValueError("Review exceeds 32768 UTF-8 bytes.")
+        if len(self.model_dump_json().encode()) > MAX_REVIEW_BYTES:
+            raise ValueError(f"Review exceeds {MAX_REVIEW_BYTES} UTF-8 bytes.")
         return self
 
 

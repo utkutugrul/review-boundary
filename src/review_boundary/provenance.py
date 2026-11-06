@@ -39,6 +39,14 @@ HARNESS_FILES = (
     "repository_cases.py",
     "repository_world.py",
     "repository_runner.py",
+    "boundary_cases.py",
+    "boundary_world.py",
+    "boundary_policy.py",
+    "boundary_runner.py",
+    "mcp_adapter.py",
+    "mcp_bridge.py",
+    "corpus_upstream_pyjwt.py",
+    "upstream_runner.py",
 )
 
 

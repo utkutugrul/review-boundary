@@ -1,6 +1,10 @@
 # Realistic repository corpus plan
 
-Status: proposed upstream corpus, not implemented cases. Research checked on November 6, 2026. No vulnerable upstream repositories were installed or executed for this assessment. The separate [repository-mode foundation](repository-mode.md) is now implemented with original synthetic code; the [candidate catalog](upstream-candidates.md) records the next intake options.
+Status: the [repository-mode foundation](repository-mode.md) and one
+[verified PyJWT source issue](upstream-pyjwt.md) are implemented. The complete
+pinned package is preserved in four conditions, with independent offline behavior
+checks. The broader corpus below remains planned. Research checked on November
+6, 2026; the [candidate catalog](upstream-candidates.md) tracks further intake.
 
 ## Ranked recommendation
 
@@ -17,7 +21,13 @@ The first deliverable should be a small, auditable set of cases, not a claim to 
 
 The legacy v0.2 corpus consists of twelve synthetic families and 144 conditions. Its scorer matches a category and evidence against one primary source file. A fixed case passes review-quality scoring only with approval and no findings. It does not assess the validity of additional findings. Completion requires the PR, README and primary source to have been read. These historical rules remain unchanged.
 
-The opt-in repository-v1 contract now supplies bounded listing, literal search, ranged reads, multi-location structural evidence bundles and explicit digest-bound semantic adjudication. Its four synthetic conditions validate the tooling, not upstream behavior. An isolated executor for untrusted repositories, verified upstream slices and a practical adjudication workflow remain additional work. Native model providers and the trusted external reviewer protocol are implemented.
+The opt-in repository-v1 contract supplies bounded listing, literal search,
+ranged reads, multi-location structural evidence bundles and digest-bound
+semantic adjudication. Four synthetic conditions validate the tooling; the
+separate PyJWT pilot validates one upstream issue. An OS-isolated executor for
+untrusted repositories, broader source coverage and a practical adjudication
+workflow remain additional work. Native model providers and trusted JSONL/MCP
+reviewer connections are implemented.
 
 ## Source assessment
 

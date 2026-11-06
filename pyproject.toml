@@ -25,6 +25,12 @@ Issues = "https://github.com/utkutugrul/review-boundary/issues"
 review-boundary = "review_boundary.cli:main"
 
 [project.optional-dependencies]
+upstream = [
+    "cryptography==50.0.2",
+]
+mcp = [
+    "mcp>=1.30,<2",
+]
 github = [
     "pyjwt[crypto]>=2.10,<3",
 ]
@@ -34,6 +40,15 @@ dev = ["pytest", "pytest-asyncio", "ruff"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/review_boundary"]
+
+[tool.hatch.build.targets.sdist]
+exclude = [
+    "/dist",
+    "/dist-check",
+    "/logs",
+    "/reports",
+    "/runs",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -132,6 +132,14 @@ def test_reviewer_view_never_serializes_evaluator_metadata():
     )
 
 
+def test_submit_schema_exposes_the_public_category_vocabulary():
+    submit_schema = next(tool for tool in tool_schemas() if tool["name"] == "submit_review")
+    category = submit_schema["parameters"]["$defs"]["RepositoryFinding"]["properties"]["category"]
+    assert "authorization" in category["description"]
+    assert "algorithm_confusion" in category["description"]
+    assert category["pattern"] == "^[a-z][a-z0-9_]{0,63}$"
+
+
 @pytest.mark.parametrize(
     "path",
     [

@@ -1,0 +1,140 @@
+{
+  "additional_notices": [
+    {
+      "commit": "7ad94db26b0bc21d10953f5dbad3acfdfacf57aa",
+      "license": "MIT",
+      "path": "PEM-LICENSE.txt",
+      "reason": "The fixed jwt/utils.py attributes its PEM recognition expression to this source.",
+      "sha256": "fee982d79c3d7c160d8649ede864779f3002e86613d4fee0544a060af26a4a8c",
+      "upstream": "https://github.com/hynek/pem",
+      "url": "https://raw.githubusercontent.com/hynek/pem/7ad94db26b0bc21d10953f5dbad3acfdfacf57aa/LICENSE"
+    }
+  ],
+  "advisory": "https://github.com/jpadilla/pyjwt/security/advisories/GHSA-ffqj-6fqr-9h24",
+  "license": "MIT",
+  "schema_version": 1,
+  "snapshots": {
+    "fixed": {
+      "commit": "9c528670c455b8d948aff95ed50e22940d1ad3fc",
+      "files": {
+        "LICENSE": {
+          "bytes": 1085,
+          "sha256": "797a7a20231d4c433e9f1911db1731d06b5828b98f499819a034f7c0f56f5ce5",
+          "url": "https://raw.githubusercontent.com/jpadilla/pyjwt/9c528670c455b8d948aff95ed50e22940d1ad3fc/LICENSE"
+        },
+        "jwt/__init__.py": {
+          "bytes": 1548,
+          "sha256": "b729d36979970b7c209019ed3323189a617d08bed66c4f8e84797730cbf5f064",
+          "url": "https://raw.githubusercontent.com/jpadilla/pyjwt/9c528670c455b8d948aff95ed50e22940d1ad3fc/jwt/__init__.py"
+        },
+        "jwt/algorithms.py": {
+          "bytes": 22392,
+          "sha256": "e1cf03fe47b4379ca48ba8b4ef30b3893ef4df04957fb09489b424a803d3012f",
+          "url": "https://raw.githubusercontent.com/jpadilla/pyjwt/9c528670c455b8d948aff95ed50e22940d1ad3fc/jwt/algorithms.py"
+        },
+        "jwt/api_jwk.py": {
+          "bytes": 3114,
+          "sha256": "8d0481d646828b9060c1beccbb4bdf966a8e50261f358471c2d3d0599f444575",
+          "url": "https://raw.githubusercontent.com/jpadilla/pyjwt/9c528670c455b8d948aff95ed50e22940d1ad3fc/jwt/api_jwk.py"
+        },
+        "jwt/api_jws.py": {
+          "bytes": 9186,
+          "sha256": "387145a5dec9e6b7f3a1a8ac4d0173ec2dda860323692ed3b4437dd868c4f013",
+          "url": "https://raw.githubusercontent.com/jpadilla/pyjwt/9c528670c455b8d948aff95ed50e22940d1ad3fc/jwt/api_jws.py"
+        },
+        "jwt/api_jwt.py": {
+          "bytes": 8025,
+          "sha256": "674f4e3e9db4cc1c8e56bb6c30c6db944e78a5f6f8e6d0e87bedd45c5e3c5574",
+          "url": "https://raw.githubusercontent.com/jpadilla/pyjwt/9c528670c455b8d948aff95ed50e22940d1ad3fc/jwt/api_jwt.py"
+        },
+        "jwt/exceptions.py": {
+          "bytes": 963,
+          "sha256": "ce9f76f03add47099fe0d615fb34ee6c791bd57a8f6a3d76b2de528bd2cb0cbb",
+          "url": "https://raw.githubusercontent.com/jpadilla/pyjwt/9c528670c455b8d948aff95ed50e22940d1ad3fc/jwt/exceptions.py"
+        },
+        "jwt/help.py": {
+          "bytes": 1605,
+          "sha256": "89baa4f2d41eb7117049665f5bed5cc7fb4c7e96888ac0e56280db09ea7e4ef3",
+          "url": "https://raw.githubusercontent.com/jpadilla/pyjwt/9c528670c455b8d948aff95ed50e22940d1ad3fc/jwt/help.py"
+        },
+        "jwt/jwks_client.py": {
+          "bytes": 1914,
+          "sha256": "783fd67b3496035d8e2fa0659623b5959f59f08382613bb70be0f8671c85da5e",
+          "url": "https://raw.githubusercontent.com/jpadilla/pyjwt/9c528670c455b8d948aff95ed50e22940d1ad3fc/jwt/jwks_client.py"
+        },
+        "jwt/py.typed": {
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "url": "https://raw.githubusercontent.com/jpadilla/pyjwt/9c528670c455b8d948aff95ed50e22940d1ad3fc/jwt/py.typed"
+        },
+        "jwt/utils.py": {
+          "bytes": 3993,
+          "sha256": "d03019f4703a16b196dbc88a717a79eea1b2191f89630600060165f1be11cd27",
+          "url": "https://raw.githubusercontent.com/jpadilla/pyjwt/9c528670c455b8d948aff95ed50e22940d1ad3fc/jwt/utils.py"
+        }
+      }
+    },
+    "vulnerable": {
+      "commit": "24b29adfebcb4f057a3cef5aaf35653bc0c1c8cc",
+      "files": {
+        "LICENSE": {
+          "bytes": 1085,
+          "sha256": "797a7a20231d4c433e9f1911db1731d06b5828b98f499819a034f7c0f56f5ce5",
+          "url": "https://raw.githubusercontent.com/jpadilla/pyjwt/24b29adfebcb4f057a3cef5aaf35653bc0c1c8cc/LICENSE"
+        },
+        "jwt/__init__.py": {
+          "bytes": 1548,
+          "sha256": "bdf72143bda227a09a230fedb315d20624ede3a3f761f4fbf0ddf7b77830403d",
+          "url": "https://raw.githubusercontent.com/jpadilla/pyjwt/24b29adfebcb4f057a3cef5aaf35653bc0c1c8cc/jwt/__init__.py"
+        },
+        "jwt/algorithms.py": {
+          "bytes": 22388,
+          "sha256": "c9e8948582e58998172687e072784b757fe8ed67aa90c1eca8182b37702f1cb0",
+          "url": "https://raw.githubusercontent.com/jpadilla/pyjwt/24b29adfebcb4f057a3cef5aaf35653bc0c1c8cc/jwt/algorithms.py"
+        },
+        "jwt/api_jwk.py": {
+          "bytes": 3114,
+          "sha256": "8d0481d646828b9060c1beccbb4bdf966a8e50261f358471c2d3d0599f444575",
+          "url": "https://raw.githubusercontent.com/jpadilla/pyjwt/24b29adfebcb4f057a3cef5aaf35653bc0c1c8cc/jwt/api_jwk.py"
+        },
+        "jwt/api_jws.py": {
+          "bytes": 9186,
+          "sha256": "387145a5dec9e6b7f3a1a8ac4d0173ec2dda860323692ed3b4437dd868c4f013",
+          "url": "https://raw.githubusercontent.com/jpadilla/pyjwt/24b29adfebcb4f057a3cef5aaf35653bc0c1c8cc/jwt/api_jws.py"
+        },
+        "jwt/api_jwt.py": {
+          "bytes": 8025,
+          "sha256": "674f4e3e9db4cc1c8e56bb6c30c6db944e78a5f6f8e6d0e87bedd45c5e3c5574",
+          "url": "https://raw.githubusercontent.com/jpadilla/pyjwt/24b29adfebcb4f057a3cef5aaf35653bc0c1c8cc/jwt/api_jwt.py"
+        },
+        "jwt/exceptions.py": {
+          "bytes": 963,
+          "sha256": "ce9f76f03add47099fe0d615fb34ee6c791bd57a8f6a3d76b2de528bd2cb0cbb",
+          "url": "https://raw.githubusercontent.com/jpadilla/pyjwt/24b29adfebcb4f057a3cef5aaf35653bc0c1c8cc/jwt/exceptions.py"
+        },
+        "jwt/help.py": {
+          "bytes": 1605,
+          "sha256": "89baa4f2d41eb7117049665f5bed5cc7fb4c7e96888ac0e56280db09ea7e4ef3",
+          "url": "https://raw.githubusercontent.com/jpadilla/pyjwt/24b29adfebcb4f057a3cef5aaf35653bc0c1c8cc/jwt/help.py"
+        },
+        "jwt/jwks_client.py": {
+          "bytes": 1914,
+          "sha256": "783fd67b3496035d8e2fa0659623b5959f59f08382613bb70be0f8671c85da5e",
+          "url": "https://raw.githubusercontent.com/jpadilla/pyjwt/24b29adfebcb4f057a3cef5aaf35653bc0c1c8cc/jwt/jwks_client.py"
+        },
+        "jwt/py.typed": {
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "url": "https://raw.githubusercontent.com/jpadilla/pyjwt/24b29adfebcb4f057a3cef5aaf35653bc0c1c8cc/jwt/py.typed"
+        },
+        "jwt/utils.py": {
+          "bytes": 2471,
+          "sha256": "2a08ff87e1bc8c5d0aa311b9de07bc2aa9479c4952788d525b0d081d529c2df2",
+          "url": "https://raw.githubusercontent.com/jpadilla/pyjwt/24b29adfebcb4f057a3cef5aaf35653bc0c1c8cc/jwt/utils.py"
+        }
+      }
+    }
+  },
+  "source_group": "pyjwt_GHSA_ffqj_6fqr_9h24",
+  "upstream_repository": "https://github.com/jpadilla/pyjwt"
+}

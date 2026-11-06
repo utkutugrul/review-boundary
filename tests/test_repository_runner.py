@@ -63,6 +63,36 @@ def run_cli(tmp_path, config=CONFIG, suite=None):
 
 
 @POSIX_ONLY
+def test_external_adapter_cannot_read_prior_evaluator_outputs_between_invocations(tmp_path):
+    output = tmp_path / "result"
+    observed = tmp_path / "artifact-visibility.jsonl"
+    config = child_program(
+        tmp_path,
+        f"""
+import json
+from pathlib import Path
+import sys
+json.loads(sys.stdin.readline())
+root = Path({str(output)!r})
+paths = [root / name for name in (
+    "suite.json", "manifest.json", "events.jsonl", "report.json", "report.html"
+)]
+with Path({str(observed)!r}).open("a") as stream:
+    stream.write(json.dumps({{path.name: path.exists() for path in paths}}) + "\\n")
+print(json.dumps({{"type": "done"}}), flush=True)
+sys.stdin.readline()
+""",
+    )
+    assert main(["repository-run-adapter", "--adapter", str(config), "--output", str(output)]) == 2
+    visibility = [json.loads(line) for line in observed.read_text().splitlines()]
+    assert len(visibility) == 4
+    assert all(not any(invocation.values()) for invocation in visibility)
+    for name in ("suite.json", "manifest.json", "events.jsonl", "report.json", "report.html"):
+        assert (output / name).exists()
+    assert len((output / "events.jsonl").read_text().splitlines()) == 4
+
+
+@POSIX_ONLY
 async def test_repository_start_envelope_omits_all_evaluator_identifiers(tmp_path):
     capture = tmp_path / "start.json"
     config = child_program(

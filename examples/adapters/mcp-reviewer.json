@@ -1,0 +1,14 @@
+{
+  "name": "mcp-fixture-client",
+  "command": ["{python}", "{config_dir}/mcp_reference.py"],
+  "source_files": ["mcp_reference.py"],
+  "env_allowlist": [],
+  "limits": {
+    "max_calls": 64,
+    "max_line_bytes": 65536,
+    "max_stderr_bytes": 16384,
+    "idle_timeout": 15.0,
+    "total_timeout": 25.0,
+    "shutdown_timeout": 2.0
+  }
+}

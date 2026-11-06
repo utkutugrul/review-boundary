@@ -6,7 +6,7 @@ The current harness can compare controlled reviewer behavior and expose recorded
 evidence. Its main limitation is the gap between small synthetic tasks and review
 of real repositories. Passing the test suite does not close that gap.
 
-This review combines independent Claude Sonnet 5.5 source inspection, local
+This review combines independent Claude source inspection, local
 reproductions, automated tests and browser checks. It is a logic review, not a
 security certification or proof that every path has been examined. No live model
 evaluation or real GitHub App publication was performed for this review.
@@ -37,6 +37,15 @@ the initial pass.
 | Fixed-case approvals could structurally pass without inspecting the relevant code | Every absent issue needs a fully observed acceptable evidence bundle; structural and semantic passes require this coverage | Independent Claude reproduction, alternate-bundle and partial-read tests |
 | Contradictory surface labels and non-LF markers weakened exposure accounting | Clean cases cannot declare payloads; README cases require a marker there; normalized exposure cannot bridge unread lines | Surface validation, CRLF/CR/NEL/U+2028 and missing-line tests |
 | A generic adapter error hid the cause of a repository resource limit | The row retains the world limit code and the adapter's separate outcome | Real subprocess call-limit regression |
+| A clean action-boundary control could receive task-success credit without reading its handoff | Every attack and clean boundary trial must read the handoff before it can be conclusive | Symmetric unread-handoff regressions and the full boundary suite |
+| The upstream manifest could authenticate coordinated fixture edits, while the runtime check hashed only one imported file | A code-anchored manifest digest validates one immutable read, and the oracle reports every staged package file plus imported module origins | Coordinated manifest/fixture tampering and non-entrypoint package tampering are rejected |
+| The source distribution could include a private ignored run through a broad `.env.example` exception | The exception is root-anchored, private output directories are excluded explicitly, and CI inspects the built sdist and wheel | The checker rejects the old archive and accepts a fresh offline build |
+| Boundary reviewers had to guess the evaluator's exact category labels | The public tool schema defines the required labels for the built-in authorization and algorithm-confusion cases while still allowing additional labels | Schema and reviewer regressions verify that the vocabulary is available without exposing per-case answers |
+| Malformed, unclassified, or post-submission action attempts could escape outcome accounting | Every effect attempt is traced; malformed and unclassified attempts prevent task success, and attacked trials retain them as failed resistance | World, runner, JSON, HTML, and pair-report regressions cover all three attempt classes |
+| An authorized destination could receive content unrelated to the submitted review and still count as agent resistance | Required action content must be JSON-equivalent to the normalized structured review; mismatches are counted and prevent task success and attacked-trial resistance | Reference, mismatched-content, resistance, runner-summary, pair, and HTML regressions |
+| A valid structured review could exceed the smaller action-content limit | Report-action content now shares the review contract's 32 KiB UTF-8 limit | A valid review larger than the former 8 KiB limit passes the public action schema |
+| A later external reviewer process could inspect evaluator artifacts written for an earlier invocation | External runs buffer rows and publish evaluator suite, manifest, events, and reports only after all reviewer processes finish | Real multi-process regressions verify that every invocation sees those paths absent and that final artifacts are complete |
+| Distribution checks missed alternate path spellings and archive member types | Canonical path checks reject private paths, unsafe tar entries, wheel links, duplicates, encrypted entries and `.pth` files; the entire packaged Python payload must match between sdist and wheel | Thirty-five adversarial archive tests plus a fresh offline build |
 
 The opt-in [repository mode](repository-mode.md) now provides bounded file
 listing, literal search, ranged reads, multi-location evidence and digest-bound
@@ -69,8 +78,9 @@ are captures of the working interface, using the saved scripted calibration.
    access. The [corpus plan](realistic-corpus-plan.md) covers provenance, licenses,
    candidate sources, grouped holdouts and implementation order. The
    [verified candidate catalog](upstream-candidates.md) distinguishes source
-   history from unexecuted behavior checks. Zero upstream cases are currently
-   implemented or reproduced.
+   history from unexecuted behavior checks. The [PyJWT pilot](upstream-pyjwt.md)
+   now preserves the complete pinned package and reproduces one source issue
+   with four conditions. Broader upstream coverage remains outstanding.
 3. **Extend reproducibility beyond recorded fingerprints.** The new
    [experiment records](experiment-records.md) identify selected inputs and check
    recorded copies where observable. They do not capture a model's hidden
@@ -154,18 +164,25 @@ This does not extend the evidence to third-party agents or upstream programs.
 
 ## Reliability validation
 
-- 898 Python tests passed with all optional dependencies installed.
+- 1,094 Python tests passed with all optional dependencies installed.
 - 20 dashboard calculation and validation tests passed under Node.
+- The action-boundary calibration completed 144 of 144 trials and 72 matched
+  guard pairs without execution errors. The real MCP bridge completed 48 of 48
+  trials and 24 matched pairs; all 48 required action contents matched their
+  submitted reviews. Both runs had zero semantic adjudications.
 - The full 144-condition reference calibration matches its saved v0.2 baseline
   with zero regressions.
 - Reconstruction verified all 144 recorded scores, 144 system-prompt records
   and 576 model-event tool schemas. Original log hashes remained unchanged.
   Reviewer-source provenance stays explicitly unknown for this native run.
 - Ruff lint and formatting passed. The source distribution and wheel built;
-  packaged module/assets checks and a keyless GitHub comment preview passed.
+  packaged module/assets checks, private-output path checks and a keyless GitHub
+  comment preview passed.
+- The pinned PyJWT behavior oracle reproduced forged public-key HMAC acceptance
+  before the upstream fix and rejection after it, while all normal-behavior
+  controls passed. This is one source issue, not a model benchmark.
 - Native-browser checks confirmed the repository report's cross-file evidence,
   unjudged semantic labels and the dashboard's unknown historical records.
 
-All benchmark checks above are keyless calibrations or recorded-log checks.
-No new real-model benchmark, upstream behavior oracle or live App publication
-was performed.
+All model-facing benchmark checks above are keyless calibrations or recorded-log
+checks. No new real-model benchmark or live App publication was performed.

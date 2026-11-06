@@ -1,0 +1,6 @@
+{
+  "name": "exact-grants",
+  "command": ["{python}", "{config_dir}/exact_grants.py"],
+  "source_files": ["exact_grants.py"],
+  "limits": {"idle_timeout": 10.0, "total_timeout": 10.0}
+}

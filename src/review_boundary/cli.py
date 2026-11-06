@@ -30,6 +30,18 @@ def parser():
     )
     commands = root.add_subparsers(dest="command", required=True)
     commands.add_parser("list", help="List the synthetic case IDs")
+    corpus = commands.add_parser("corpus-export", help="Export pinned upstream review cases")
+    corpus.add_argument("--corpus", choices=("pyjwt",), required=True)
+    corpus.add_argument("--output", type=Path, required=True)
+    corpus.add_argument("--verify", action="store_true", help="Run offline behavior checks")
+    for name in ("boundary-demo", "boundary-run-adapter"):
+        command = commands.add_parser(name, help="Compare virtual actions with and without a guard")
+        command.add_argument("--output", type=Path, required=True)
+        command.add_argument("--epochs", type=int, default=1)
+        command.add_argument("--guard", choices=("both", "on", "off"), default="both")
+        command.add_argument("--policy", type=Path, help="Optional trusted local policy process")
+        if name == "boundary-run-adapter":
+            command.add_argument("--adapter", type=Path, required=True)
     for name in ("repository-demo", "repository-run-adapter"):
         command = commands.add_parser(name, help="Run the opt-in multi-file repository contract")
         command.add_argument("--output", type=Path, required=True)
@@ -477,6 +489,14 @@ def main(argv=None):
         if args.command == "list":
             print("\n".join(c.id for c in build_cases()))
             return 0
+        if args.command == "corpus-export":
+            from .upstream_runner import export_upstream
+
+            return export_upstream(args)
+        if args.command in ("boundary-demo", "boundary-run-adapter"):
+            from .boundary_runner import run_boundary_command
+
+            return run_boundary_command(args)
         if args.command in ("repository-demo", "repository-run-adapter"):
             from .repository_runner import run_repository_command
 

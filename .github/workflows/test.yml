@@ -30,6 +30,11 @@ jobs:
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run --frozen --all-extras pytest -q
+      - name: Verify distribution file selection
+        if: matrix.python == '3.11'
+        run: |
+          uv build --out-dir "${{ runner.temp }}/review-boundary-dist"
+          uv run python scripts/check_distribution.py "${{ runner.temp }}/review-boundary-dist"
       - name: Check dashboard data handling
         run: node --test tests/web/dashboard.test.cjs
       - name: Calibrate the full corpus and compare its saved baseline

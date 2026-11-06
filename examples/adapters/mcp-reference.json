@@ -1,0 +1,14 @@
+{
+  "name": "mcp-fixture-reference",
+  "command": ["{python}", "-m", "review_boundary.mcp_adapter", "--reviewer", "{config_dir}/mcp-reviewer.json"],
+  "source_files": ["mcp-reviewer.json", "mcp_reference.py"],
+  "env_allowlist": [],
+  "limits": {
+    "max_calls": 64,
+    "max_line_bytes": 65536,
+    "max_stderr_bytes": 16384,
+    "idle_timeout": 15.0,
+    "total_timeout": 30.0,
+    "shutdown_timeout": 5.0
+  }
+}
