@@ -27,10 +27,16 @@ def planned_cost(samples, turns, input_bytes, output_tokens, prompt_price, compl
     return math.ceil(cost * RESERVATION_MARGIN * 1_000_000) / 1_000_000
 
 
+def ledger_artifact_paths(path: Path) -> tuple[Path, Path, Path]:
+    """Return the ledger, exclusive lock, and atomic replacement paths."""
+    path = Path(path)
+    return path, path.with_suffix(".lock"), path.with_suffix(".tmp")
+
+
 @contextmanager
 def ledger_lock(path: Path):
     path.parent.mkdir(parents=True, exist_ok=True)
-    lock = path.with_suffix(".lock")
+    _, lock, _ = ledger_artifact_paths(path)
     try:
         fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
     except FileExistsError as exc:
@@ -43,7 +49,7 @@ def ledger_lock(path: Path):
 
 
 def save_ledger(path: Path, data: dict) -> None:
-    temporary = path.with_suffix(".tmp")
+    _, _, temporary = ledger_artifact_paths(path)
     temporary.write_text(json.dumps(data, indent=2) + "\n")
     os.replace(temporary, path)
 

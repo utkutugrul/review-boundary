@@ -51,6 +51,33 @@ def parser():
             command.add_argument(
                 "--suite", type=Path, help="Custom evaluator-only repository suite"
             )
+    repository_model = commands.add_parser(
+        "repository-run-model", help="Run provider models in the multi-file repository contract"
+    )
+    repository_model.add_argument("--output", type=Path, required=True)
+    repository_model.add_argument("--suite", type=Path)
+    repository_model.add_argument("--epochs", type=int, default=1)
+    repository_model.add_argument("--max-turns", type=int, default=8)
+    repository_model.add_argument("--max-input-bytes", type=int, default=24000)
+    repository_model.add_argument("--max-output-tokens", type=int, default=8192)
+    repository_model.add_argument("--max-calls", type=int, default=64)
+    repository_model.add_argument("--max-response-bytes", type=int, default=16384)
+    repository_model.add_argument("--max-total-response-bytes", type=int, default=262144)
+    repository_model.add_argument("--max-read-lines", type=int, default=80)
+    repository_model.add_argument("--max-list-entries", type=int, default=20)
+    repository_model.add_argument("--max-search-matches", type=int, default=20)
+    repository_model.add_argument(
+        "--provider", choices=("openrouter", "openai", "anthropic"), default="openrouter"
+    )
+    repository_model.add_argument("--model", action="append", required=True)
+    repository_model.add_argument("--pricing-file", type=Path)
+    repository_model.add_argument("--opencode-auth", type=Path)
+    repository_model.add_argument("--budget", type=float, default=20.0)
+    repository_model.add_argument("--ledger", type=Path, default=Path("runs/budget.json"))
+    repository_model.add_argument("--prompt-price-cap", type=float)
+    repository_model.add_argument("--completion-price-cap", type=float)
+    repository_model.add_argument("--concurrency", type=int, default=2)
+    repository_model.add_argument("--dry-run", action="store_true")
     for name in ("demo", "run", "run-adapter"):
         command = commands.add_parser(name)
         command.add_argument("--output", type=Path)
@@ -497,10 +524,18 @@ def main(argv=None):
             from .boundary_runner import run_boundary_command
 
             return run_boundary_command(args)
-        if args.command in ("repository-demo", "repository-run-adapter"):
-            from .repository_runner import run_repository_command
+        if args.command in (
+            "repository-demo",
+            "repository-run-adapter",
+            "repository-run-model",
+        ):
+            from .repository_runner import run_repository_command, run_repository_model
 
-            return run_repository_command(args)
+            return (
+                run_repository_model(args)
+                if args.command == "repository-run-model"
+                else run_repository_command(args)
+            )
         if args.command == "dashboard":
             from .dashboard import default_report_paths, write_dashboard
 

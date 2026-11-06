@@ -27,6 +27,46 @@ findings, cited source ranges, tool events, and experiment metadata inspectable.
 An exit code of 0 means the run finished without recorded execution errors;
 it does not mean every review passed. Execution errors return 2.
 
+## Run a provider model
+
+Repository mode can use the same OpenRouter, native OpenAI, or native Anthropic
+controls as the original suite. Preview a native OpenAI run without loading a
+credential or creating output files:
+
+```sh
+uv run --frozen review-boundary repository-run-model \
+  --provider openai \
+  --model YOUR_NATIVE_MODEL_ID \
+  --pricing-file openai-pricing.json \
+  --epochs 1 \
+  --output runs/repository-model \
+  --budget 20 \
+  --dry-run
+```
+
+Remove `--dry-run` to start the paid run after setting the selected provider's
+API key. OpenRouter uses its live catalog and price ceiling instead of a local
+pricing file. See the [provider guide](providers.md) for endpoint, credential,
+pricing, and reservation rules.
+
+The command accepts `--suite`, repeated `--model`, `--epochs`, `--concurrency`,
+the generation bounds `--max-turns`, `--max-input-bytes`, and
+`--max-output-tokens`, plus all six virtual-world limits. Every model and epoch
+starts from a fresh validated world snapshot. Inspect logs are accepted only
+when trusted scorer metadata covers each declared case, model, and epoch slot.
+Missing or duplicate slots fail closed. Provider failures produce explicit
+failed rows without copying provider response bodies into the report.
+
+The local budget ledger reserves a conservative maximum before model creation.
+A reservation is released only when every recorded provider call has complete
+provider-reported cost evidence and every selected model execution is free of
+provider, integrity, log, and row failures. Token-based SDK estimates do not
+settle it. The output must be a new or empty path without symlink components.
+The ledger and its `.lock` and `.tmp` companions must stay outside the output
+tree and must not overlap generated artifacts.
+The report still keeps `semantic_passed` as `null`; using a real model does not
+turn structural rubric matching into semantic adjudication.
+
 ## A separate report contract
 
 | Mode | Scoring version | Corpus version | Report format |
@@ -130,7 +170,8 @@ There is no automatic semantic judge or adjudication-import CLI.
 
 ## Custom suite JSON
 
-Pass `--suite path/to/suite.json` to `repository-run-adapter`. The top-level
+Pass `--suite path/to/suite.json` to `repository-run-adapter` or
+`repository-run-model`. The top-level
 object contains exactly `schema_version: 1` and `cases`, with 1 through 32
 uniquely named cases. `RepositoryCase.model_validate_json()` validates each case.
 

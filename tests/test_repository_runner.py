@@ -2,11 +2,17 @@ import html
 import json
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+from inspect_ai.model import ChatCompletionChoice, ChatMessageAssistant, ModelOutput, get_model
+from inspect_ai.tool import ToolCall
 
+from review_boundary import cli, repository_runner
 from review_boundary.adapter import AdapterConfig, RepositoryAdapterRequest, run_adapter
 from review_boundary.cli import main
+from review_boundary.model_safety import ProviderRequestError
+from review_boundary.providers import COMMON_OVERRIDES, OVERRIDE_VARIABLES
 from review_boundary.repository_cases import build_repository_demo_cases
 from review_boundary.repository_runner import (
     PROTOCOL,
@@ -15,6 +21,7 @@ from review_boundary.repository_runner import (
     repository_profile,
     write_repository_report,
 )
+from review_boundary.repository_task import context as repository_context
 from review_boundary.repository_world import (
     RepositoryLimits,
     RepositoryWorld,
@@ -60,6 +67,385 @@ def run_cli(tmp_path, config=CONFIG, suite=None):
     assert manifest["adapter"]["protocol"] == PROTOCOL
     assert manifest["os_sandboxed"] is False
     return status, report
+
+
+def repository_model_argv(tmp_path, provider, *, dry_run=False):
+    model = "vendor/test-model" if provider == "openrouter" else "test-model"
+    argv = [
+        "repository-run-model",
+        "--provider",
+        provider,
+        "--model",
+        model,
+        "--epochs",
+        "1",
+        "--output",
+        str(tmp_path / "model-result"),
+        "--ledger",
+        str(tmp_path / "model-budget.json"),
+    ]
+    if provider != "openrouter":
+        pricing = tmp_path / f"{provider}-pricing.json"
+        source = (
+            "https://openai.com/api/pricing/"
+            if provider == "openai"
+            else "https://platform.claude.com/docs/en/about-claude/pricing"
+        )
+        pricing.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "provider": provider,
+                    "source": source,
+                    "as_of": "2026-01-01",
+                    "models": {
+                        model: {
+                            "input_usd_per_million": 1,
+                            "output_usd_per_million": 2,
+                        }
+                    },
+                }
+            )
+        )
+        argv.extend(("--pricing-file", str(pricing)))
+    if dry_run:
+        argv.append("--dry-run")
+    return argv
+
+
+def repository_success_model():
+    def respond(input, tools, tool_choice, config):
+        case, world = repository_context()
+        events = world.events
+        if not any(event["tool"] == "read_pr" for event in events):
+            function, arguments = "read_pr", {}
+        elif not any(event["tool"] == "list_files" for event in events):
+            function, arguments = "list_files", {}
+        else:
+            read = {event.get("path") for event in events if event["tool"] == "read_file"}
+            unread = next((item.path for item in case.files if item.path not in read), None)
+            if unread:
+                function, arguments = "read_file", {"path": unread, "end_line": 80}
+            else:
+                findings = []
+                if case.variant == "vulnerable":
+                    files = {item.path: item.content for item in case.files}
+                    findings = [
+                        {
+                            "category": case.issues[0].category,
+                            "summary": "The record lookup crosses the tenant boundary.",
+                            "evidence": [
+                                {
+                                    **span.model_dump(mode="json"),
+                                    "excerpt": "\n".join(
+                                        files[span.path].splitlines()[
+                                            span.start_line - 1 : span.end_line
+                                        ]
+                                    ),
+                                }
+                                for span in case.issues[0].acceptable_bundles[0].ranges
+                            ],
+                        }
+                    ]
+                function, arguments = (
+                    "submit_review",
+                    {
+                        "verdict": "request_changes" if findings else "approve",
+                        "findings": findings,
+                    },
+                )
+        return ModelOutput(
+            model="repository-provider-fake",
+            choices=[
+                ChatCompletionChoice(
+                    message=ChatMessageAssistant(
+                        content="",
+                        tool_calls=[
+                            ToolCall(
+                                id=f"repository-{len(events)}",
+                                function=function,
+                                arguments=arguments,
+                            )
+                        ],
+                    ),
+                    stop_reason="tool_calls",
+                )
+            ],
+        )
+
+    model = get_model("mockllm/repository-provider-fake", custom_outputs=respond, memoize=False)
+    model.api.model_name = "openai/test-model"
+    model.api.qualified_model_name = "openai/test-model"
+    return model
+
+
+@pytest.fixture
+def repository_provider_environment(monkeypatch):
+    for variable in (
+        *COMMON_OVERRIDES,
+        *(item for names in OVERRIDE_VARIABLES.values() for item in names),
+        "OPENROUTER_API_KEY",
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+    ):
+        monkeypatch.delenv(variable, raising=False)
+    monkeypatch.setattr(cli, "load_dotenv", lambda **kwargs: False)
+
+
+@pytest.mark.parametrize("provider", ["openrouter", "openai", "anthropic"])
+def test_repository_model_dry_run_is_keyless_and_creates_no_artifacts(
+    tmp_path, monkeypatch, capsys, repository_provider_environment, provider
+):
+    monkeypatch.setattr(
+        repository_runner,
+        "model_snapshot",
+        lambda model_ids, *args: [{"id": model_ids[0], "pricing": {}, "context_length": 1}],
+    )
+    monkeypatch.setattr(cli, "credential", lambda *args: pytest.fail("credential requested"))
+    monkeypatch.setattr(repository_runner, "reserve", lambda *args: pytest.fail("budget reserved"))
+    monkeypatch.setattr(
+        repository_runner, "guarded_model", lambda *args: pytest.fail("model constructed")
+    )
+    assert main(repository_model_argv(tmp_path, provider, dry_run=True)) == 0
+    metadata = json.loads(capsys.readouterr().out)
+    assert metadata["provider"]["name"] == provider
+    assert metadata["expected_count"] == 4
+    assert metadata["run_kind"] == "model" and metadata["run_finished"] is False
+    assert not (tmp_path / "model-result").exists()
+    assert not (tmp_path / "model-budget.json").exists()
+
+
+def test_repository_model_preserves_nonempty_output_before_provider_setup(tmp_path, monkeypatch):
+    output = tmp_path / "model-result"
+    output.mkdir()
+    preserved = output / "keep.txt"
+    preserved.write_text("preserve this result")
+    monkeypatch.setattr(
+        repository_runner,
+        "prepare_provider",
+        lambda *args, **kwargs: pytest.fail("provider setup reached"),
+    )
+    assert main(repository_model_argv(tmp_path, "openai")) == 2
+    assert preserved.read_text() == "preserve this result"
+    assert list(output.iterdir()) == [preserved]
+    assert not (tmp_path / "model-budget.json").exists()
+
+
+@pytest.mark.parametrize("kind", ["direct", "parent"])
+def test_repository_model_rejects_symlinked_output_before_writes(tmp_path, kind):
+    target = tmp_path / "target"
+    target.mkdir()
+    link = tmp_path / "linked"
+    link.symlink_to(target, target_is_directory=True)
+    output = link if kind == "direct" else link / "model-result"
+    argv = [
+        "repository-run-model",
+        "--provider",
+        "openai",
+        "--model",
+        "test-model",
+        "--output",
+        str(output),
+        "--ledger",
+        str(tmp_path / "model-budget.json"),
+        "--dry-run",
+    ]
+    assert main(argv) == 2
+    assert not list(target.iterdir())
+    assert link.is_symlink()
+    assert not (tmp_path / "model-budget.json").exists()
+
+
+@pytest.mark.parametrize("collision", ["ledger", "lock", "temporary", "report"])
+def test_repository_model_rejects_output_and_ledger_artifact_collisions(tmp_path, collision):
+    if collision in {"ledger", "report"}:
+        output = tmp_path / "model-result"
+        ledger = output / ("budget.json" if collision == "ledger" else "report.json")
+    else:
+        ledger = tmp_path / "model-budget.json"
+        output = ledger.with_suffix(".lock" if collision == "lock" else ".tmp")
+    argv = [
+        "repository-run-model",
+        "--provider",
+        "openai",
+        "--model",
+        "test-model",
+        "--output",
+        str(output),
+        "--ledger",
+        str(ledger),
+        "--dry-run",
+    ]
+    assert main(argv) == 2
+    assert not output.exists()
+    assert not ledger.exists()
+    assert not ledger.with_suffix(".lock").exists()
+    assert not ledger.with_suffix(".tmp").exists()
+
+
+@pytest.mark.parametrize("provider", ["openrouter", "openai", "anthropic"])
+def test_repository_provider_failure_emits_generic_planned_rows(
+    tmp_path, monkeypatch, repository_provider_environment, provider
+):
+    key = "synthetic-repository-key"
+    monkeypatch.setenv(
+        {
+            "openrouter": "OPENROUTER_API_KEY",
+            "openai": "OPENAI_API_KEY",
+            "anthropic": "ANTHROPIC_API_KEY",
+        }[provider],
+        key,
+    )
+    monkeypatch.setattr(
+        repository_runner,
+        "model_snapshot",
+        lambda model_ids, *args: [{"id": model_ids[0], "pricing": {}, "context_length": 1}],
+    )
+    monkeypatch.setattr(
+        repository_runner,
+        "api_get",
+        lambda *args: {"data": {"limit_remaining": 100, "usage": 0}},
+    )
+
+    def fail(*args):
+        raise ProviderRequestError("provider body " + key)
+
+    monkeypatch.setattr(repository_runner, "guarded_model", fail)
+    assert main(repository_model_argv(tmp_path, provider)) == 2
+    output = tmp_path / "model-result"
+    report = json.loads((output / "report.json").read_text())
+    manifest = json.loads((output / "manifest.json").read_text())
+    assert report["summary"]["recorded"] == report["summary"]["expected"] == 4
+    assert report["summary"]["errors"] == 4
+    assert manifest["run_finished"] is True
+    assert all(
+        row["error"] == "Provider model evaluation failed; details withheld"
+        for row in report["rows"]
+    )
+    assert all(not row["completed"] and row["semantic_passed"] is None for row in report["rows"])
+    ledger = json.loads((tmp_path / "model-budget.json").read_text())
+    assert len(ledger["runs"]) == 1 and "settled_usd" not in ledger["runs"][0]
+    assert key not in json.dumps([report, manifest])
+
+
+def test_repository_multi_model_failure_retains_complete_cost_reservation(
+    tmp_path, monkeypatch, repository_provider_environment
+):
+    monkeypatch.setenv("OPENAI_API_KEY", "synthetic-repository-key")
+    argv = repository_model_argv(tmp_path, "openai")
+    argv.extend(("--model", "second-model"))
+    pricing_path = tmp_path / "openai-pricing.json"
+    pricing = json.loads(pricing_path.read_text())
+    pricing["models"]["second-model"] = {
+        "input_usd_per_million": 1,
+        "output_usd_per_million": 2,
+    }
+    pricing_path.write_text(json.dumps(pricing))
+
+    complete_usage = SimpleNamespace(
+        input_tokens=10,
+        output_tokens=5,
+        total_cost=0.01,
+        input_tokens_cache_read=0,
+        input_tokens_cache_write=0,
+    )
+    complete_sample = SimpleNamespace(
+        error=None,
+        events=[
+            SimpleNamespace(
+                event="model",
+                call=SimpleNamespace(response={"usage": {"cost": 0.01}}),
+            )
+        ],
+    )
+    complete_log = SimpleNamespace(
+        status="success",
+        samples=[complete_sample],
+        stats=SimpleNamespace(model_usage={"openai/test-model": complete_usage}),
+    )
+    calls = 0
+
+    def evaluate(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return [complete_log]
+        raise ProviderRequestError("second provider execution failed")
+
+    def extract(logs, cases, reviewers, epochs):
+        assert logs == [complete_log]
+        rows = repository_runner.repository_error_rows(cases, reviewers[0], epochs, "complete")
+        for row in rows:
+            row["error"] = None
+        return rows
+
+    monkeypatch.setattr(repository_runner, "eval", evaluate)
+    monkeypatch.setattr(repository_runner, "guarded_model", lambda *args: object())
+    monkeypatch.setattr(repository_runner, "repository_rows_from_logs", extract)
+    monkeypatch.setattr(
+        repository_runner,
+        "settle",
+        lambda *args: pytest.fail("failed multi-model run was settled"),
+    )
+    monkeypatch.setattr(
+        repository_runner, "api_get", lambda *args: pytest.fail("OpenRouter account called")
+    )
+    monkeypatch.setattr(
+        repository_runner, "model_snapshot", lambda *args: pytest.fail("catalog called")
+    )
+
+    assert main(argv) == 2
+    ledger = json.loads((tmp_path / "model-budget.json").read_text())
+    assert len(ledger["runs"]) == 1
+    assert "settled_usd" not in ledger["runs"][0]
+    assert not (tmp_path / "model-result" / "settlement.json").exists()
+
+
+def test_repository_model_success_uses_native_task_and_trusted_scores(
+    tmp_path, monkeypatch, repository_provider_environment
+):
+    monkeypatch.setenv("OPENAI_API_KEY", "synthetic-repository-key")
+    original_prepare = repository_runner.prepare_provider
+
+    class MockPlan:
+        def __init__(self, plan):
+            self.plan = plan
+
+        def __getattr__(self, name):
+            return getattr(self.plan, name)
+
+        def inspect_model_id(self, model_id):
+            self.plan.inspect_model_id(model_id)
+            return "mockllm/openai/test-model"
+
+    monkeypatch.setattr(
+        repository_runner,
+        "prepare_provider",
+        lambda *args, **kwargs: MockPlan(original_prepare(*args, **kwargs)),
+    )
+    monkeypatch.setattr(
+        repository_runner, "api_get", lambda *args: pytest.fail("OpenRouter account called")
+    )
+    monkeypatch.setattr(
+        repository_runner, "model_snapshot", lambda *args: pytest.fail("catalog called")
+    )
+    monkeypatch.setattr(
+        repository_runner, "guarded_model", lambda *args: repository_success_model()
+    )
+    assert main(repository_model_argv(tmp_path, "openai")) == 0
+    output = tmp_path / "model-result"
+    report = json.loads((output / "report.json").read_text())
+    manifest = json.loads((output / "manifest.json").read_text())
+    assert report["summary"]["recorded"] == report["summary"]["expected"] == 4
+    assert report["summary"]["completed"] == report["summary"]["rubric_passed"] == 4
+    assert report["summary"]["semantically_adjudicated"] == 0
+    assert manifest["provider"]["name"] == "openai" and manifest["run_finished"]
+    assert manifest["reviewers"] == ["mockllm/openai/test-model"]
+    assert manifest["usage"]["api_calls_without_reported_cost"] > 0
+    assert not (output / "settlement.json").exists()
+    assert [
+        json.loads(line) for line in (output / "events.jsonl").read_text().splitlines()
+    ] == report["rows"]
 
 
 @POSIX_ONLY

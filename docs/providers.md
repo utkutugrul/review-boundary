@@ -64,6 +64,22 @@ uv run review-boundary run \
 
 For Anthropic, change the provider, model ID, and pricing-file path. Removing `--dry-run` starts a paid evaluation and requires the selected API key. Choose a new output directory for each run. The standard live default remains five epochs when `--epochs` is omitted; the example reduces the initial scope explicitly.
 
+The multi-file repository contract uses the same provider and accounting flags:
+
+```sh
+uv run review-boundary repository-run-model \
+  --provider anthropic \
+  --model YOUR_NATIVE_MODEL_ID \
+  --pricing-file anthropic-pricing.json \
+  --epochs 1 \
+  --output runs/repository-model \
+  --budget 20 --dry-run
+```
+
+Repository dry runs also avoid credential loading, ledger writes, model
+construction, and output creation. OpenRouter dry runs still validate the
+selected model against the public live catalog.
+
 ## Request controls and accounting
 
 The same virtual tools, caller contracts, read-only instructions, scoring rules, generation-turn bounds, and input/output limits apply to all three providers. Inspect prompt-cache configuration is explicitly disabled. SDK retries and Inspect generation retries are zero. Streaming is disabled using each provider's actual parameter name: `stream` for OpenRouter and `streaming` for native OpenAI/Anthropic. Provider-side automatic caching can still exist; the runner does not claim to disable an implicit server cache.

@@ -39,6 +39,7 @@ HARNESS_FILES = (
     "repository_cases.py",
     "repository_world.py",
     "repository_runner.py",
+    "repository_task.py",
     "boundary_cases.py",
     "boundary_world.py",
     "boundary_policy.py",

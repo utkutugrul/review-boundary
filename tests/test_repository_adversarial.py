@@ -561,7 +561,7 @@ def test_world_call_limit_terminates_the_run_and_never_passes(tmp_path):
     status, rows, _, _ = adapter_run(tmp_path, body, limits={"max_calls": 200})
     row = rows[0]
     assert status == 2 and row["review"] is None
-    assert {"tool": "limits", "status": "calls"} in row["events"]
+    assert {"tool": "limits", "status": "calls", "response_bytes": 0} in row["events"]
     assert (row["completed"], row["rubric_passed"]) == (False, False) and row["error"]
 
 
