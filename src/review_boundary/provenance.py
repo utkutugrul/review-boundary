@@ -41,6 +41,8 @@ HARNESS_FILES = (
     "corpus_rust.py",
     "corpus_manifest.py",
     "corpus_registry.py",
+    "corpus_candidates.py",
+    "corpus_sharding.py",
     "suite_contribution.py",
     "adapter.py",
     "model_safety.py",

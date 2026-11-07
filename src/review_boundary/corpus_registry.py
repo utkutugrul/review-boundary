@@ -26,6 +26,16 @@ from .corpus_manifest import (
 )
 from .provenance import json_digest
 from .repository_cases import REPOSITORY_SCORING_VERSION, RepositoryCase
+from .repository_cases_v2 import RepositoryCaseV2
+from .repository_runner import (
+    repository_profile,
+    repository_scoring_version,
+    repository_suite_version,
+)
+from .repository_runtime import parse_repository_case
+
+RepositoryCaseLike = RepositoryCase | RepositoryCaseV2
+MAX_REGISTERED_CASES = 1024
 
 NOTICE_PATH = "PEM-LICENSE.txt"
 NOTICE_REVIEWER_PATH = "THIRD_PARTY_LICENSES.txt"
@@ -47,11 +57,59 @@ class CorpusRegistration:
     scoring_version: str
     dependency_group: str | None
     scope: str
-    build_cases: Callable[[], tuple[RepositoryCase, ...]]
+    build_cases: Callable[[], tuple[RepositoryCaseLike, ...]]
     source_manifest: Callable[[], dict]
     verify_behavior: Callable[[], dict]
     evaluator_manifest: Callable[[], dict]
     package_inventory: Callable[[], tuple[Path, tuple[str, ...]]]
+    suite_schema_version: int = 1
+
+    def __post_init__(self):
+        if type(self.suite_schema_version) is not int or self.suite_schema_version not in (1, 2):
+            raise ValueError("Registered suite schema version must be the exact integer 1 or 2")
+
+
+@dataclass(frozen=True, slots=True)
+class RegisteredSuiteContract:
+    schema_version: int
+    scoring_version: str
+    protocol: str
+
+
+def registration_suite_contract(
+    registration: CorpusRegistration, cases: tuple[RepositoryCaseLike, ...]
+) -> RegisteredSuiteContract:
+    """Derive a trusted registration's suite contract from its checked case versions."""
+    if type(cases) is not tuple or not 1 <= len(cases) <= MAX_REGISTERED_CASES:
+        raise ValueError("Registered cases must be a tuple of 1 to 1024 cases")
+    if any(type(case) not in (RepositoryCase, RepositoryCaseV2) for case in cases):
+        raise ValueError("Registered cases require exact supported case models")
+    schema_version = repository_suite_version(cases)
+    scoring_version = repository_scoring_version(cases)
+    if (
+        type(registration.suite_schema_version) is not int
+        or registration.suite_schema_version != schema_version
+        or registration.scoring_version != scoring_version
+    ):
+        raise ValueError("Registered suite schema or scoring version does not match its cases")
+    return RegisteredSuiteContract(
+        schema_version, scoring_version, repository_profile(schema_version=schema_version).protocol
+    )
+
+
+def checked_registered_cases(registration: CorpusRegistration) -> tuple[RepositoryCaseLike, ...]:
+    """Check static builder results without accepting iterators or unchecked model updates."""
+    cases = registration.build_cases()
+    # Bound the tuple before inspecting or serializing any case.
+    if type(cases) is not tuple or not 1 <= len(cases) <= MAX_REGISTERED_CASES:
+        raise ValueError("Registered cases must be a tuple of 1 to 1024 cases")
+    if any(type(case) not in (RepositoryCase, RepositoryCaseV2) for case in cases):
+        raise ValueError("Registered cases require exact supported case models")
+    checked = tuple(parse_repository_case(case) for case in cases)
+    if len({case.case_id for case in checked}) != len(checked):
+        raise ValueError("Registered case IDs must be unique")
+    registration_suite_contract(registration, checked)
+    return checked
 
 
 def _pyjwt_cases() -> tuple[RepositoryCase, ...]:
@@ -255,7 +313,7 @@ def get_corpus(name: str) -> CorpusRegistration:
     return _REGISTRY[name]
 
 
-def build_cases(name: str) -> tuple[RepositoryCase, ...]:
+def build_cases(name: str) -> tuple[RepositoryCaseLike, ...]:
     return get_corpus(name).build_cases()
 
 
