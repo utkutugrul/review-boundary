@@ -75,9 +75,11 @@ turn structural rubric matching into semantic adjudication.
 | Bundled repository demo | `repository-v1` | `repository-demo-v1` | `schema_version: 1`, `report_kind: repository` |
 | Custom repository suite | `repository-v1` | `custom`, plus a suite digest | Same repository report format |
 
-Use the repository report's own HTML. The existing dashboard, Inspect-log
-reconstruction, and regression gate use the older contract and do not accept
-repository reports. Existing v0.2 scores and saved artifacts are unchanged.
+Use the repository report's own HTML or the unified dashboard. Repository reports
+and their version 3 envelopes also work with the native comparison gate. The
+Inspect-log `report` reconstruction command remains specific to legacy reports.
+See the [report and evidence guide](reports.md). Existing v0.2 scores and saved
+artifacts are unchanged.
 
 ## Connect a reviewer
 
@@ -190,13 +192,37 @@ conflicting decisions, unknown issue IDs, an `unknown` decision carrying an issu
 mapping, and a `supported` finding mapped to an `absent` issue. Partial artifacts
 are accepted; unlisted findings stay `unknown`.
 
-Application never reads semantics from report rows. It restores each row's frozen
-world snapshot from the trusted Inspect logs, rescores it against the original
-evaluator suite, requires the result to equal the source row, and then changes
+Application never reads semantics from report rows. It restores native frozen
+world snapshots from the trusted Inspect logs, rescores them against the original
+evaluator suite, requires the result to equal each source row, and then changes
 only the adjudication fields. An edited row, review, or event trace is rejected.
-The output is a new directory; the source report is not modified. Only native
-`repository-run-model` runs retain snapshots, so calibration and adapter reports
-cannot be adjudicated this way yet. Boundary reports are not supported.
+The output is a new directory; the source report is not modified. This workflow
+requires native `repository-run-model` observations. Calibration, adapter, and
+boundary reports cannot be adjudicated through these commands.
+
+### Mixed successful and failed reviewers
+
+A native run with a provider failure can still adjudicate another reviewer's
+usable observations. The trusted runner writes a separate
+`repository-failures.json` inside its `logs` directory after the final report.
+It binds the report, run, suite, world limits, and every failed row. Failed rows
+remain unchanged and unjudged; no observation snapshot is fabricated for them.
+
+Supply the original trusted directory explicitly, as in `--logs run/logs` above.
+Only that fixed sidecar in an explicitly supplied directory is considered; a
+file placed beside an untrusted report is not loaded automatically. Selecting a
+log directory means trusting its Inspect logs and failure sidecar as local
+harness artifacts. Hash consistency does not authenticate their author. Keep
+these artifacts outside reviewer-controlled inputs.
+
+The exception covers only exact `provider_error` rows for a complete failed
+reviewer block, across every declared case and epoch. It rejects old mixed runs
+without the sidecar, `invalid_eval_log` substitutions, and Inspect logs for a
+reviewer declared failed by the sidecar. A run with only failed synthetic rows
+and no native observations is also rejected. Retain the healthy native Inspect
+logs, original suite, and complete report together. The snapshot-artifact JSON
+used by [report export](reports.md) is a different format and cannot replace this
+trusted failure evidence.
 
 ### Labeling page
 

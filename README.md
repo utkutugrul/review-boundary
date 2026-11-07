@@ -55,6 +55,8 @@ uv run --frozen review-boundary dashboard
 
 Open `reports/dashboard.html` to browse the recorded examples, filter cases, and compare clean and hostile reviews side by side. Import your own `report.json` files directly in the browser. [Dashboard guide](docs/dashboard.md).
 
+[View native reports, export versioned evidence, and compare runs](docs/reports.md).
+
 ![ReviewBoundary dashboard showing recorded samples, outcomes by context, and matched clean controls.](assets/dashboard-overview.png)
 
 <details>

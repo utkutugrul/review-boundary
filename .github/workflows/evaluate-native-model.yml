@@ -1,0 +1,268 @@
+name: Reusable native provider evaluation
+
+on:
+  workflow_call:
+    outputs:
+      artifact_id:
+        description: Immutable ID of the uploaded native report and comparison artifact
+        value: ${{ jobs.compare.outputs.artifact_id }}
+      comparison_ready:
+        description: Whether a completed native comparison was uploaded
+        value: ${{ jobs.compare.outputs.comparison_ready }}
+    inputs:
+      allow_live:
+        description: Explicit opt-in to paid provider execution; false skips both jobs
+        type: boolean
+        default: false
+      profile:
+        description: repository-model or boundary-model; fixed trusted provider runners only
+        type: string
+        required: true
+      provider:
+        description: openrouter, openai or anthropic
+        type: string
+        required: true
+      model:
+        description: One explicit provider-native model ID
+        type: string
+        required: true
+      baseline:
+        description: Approved native model report JSON in the selected data repository
+        type: string
+        required: true
+      baseline_source:
+        description: harness or caller; caller data is read from the trusted PR base commit
+        type: string
+        default: caller
+      suite:
+        description: Bounded virtual suite JSON in the baseline data repository
+        type: string
+        required: true
+      baseline_reviewer:
+        type: string
+        required: true
+      candidate_reviewer:
+        description: Must equal provider/model for the selected candidate
+        type: string
+        required: true
+      baseline_guard:
+        description: Required on or off for boundary-model
+        type: string
+        default: ""
+      candidate_guard:
+        description: Required on or off for boundary-model
+        type: string
+        default: ""
+      pricing_file:
+        description: Required dated quote for openai or anthropic, in the baseline repository
+        type: string
+        default: ""
+      budget:
+        description: Positive conservative USD reservation limit, no larger than 20
+        type: number
+        default: 20
+      prompt_price_cap:
+        description: Optional input admission cap in USD per million tokens
+        type: string
+        default: ""
+      completion_price_cap:
+        description: Optional output admission cap in USD per million tokens
+        type: string
+        default: ""
+      artifact_name:
+        type: string
+        default: reviewboundary-native-model
+    secrets:
+      OPENROUTER_API_KEY:
+        required: false
+      OPENAI_API_KEY:
+        required: false
+      ANTHROPIC_API_KEY:
+        required: false
+
+permissions:
+  contents: read
+
+env:
+  RB_SERVER_URL: ${{ github.server_url }}
+  RB_EVENT: ${{ github.event_name }}
+  RB_REPOSITORY: ${{ github.repository }}
+  RB_MODE: model
+  RB_ALLOW_LIVE: ${{ inputs.allow_live }}
+  RB_PROFILE: ${{ inputs.profile }}
+  RB_PROVIDER: ${{ inputs.provider }}
+  RB_MODEL: ${{ inputs.model }}
+  RB_BASELINE: ${{ inputs.baseline }}
+  RB_BASELINE_SOURCE: ${{ inputs.baseline_source }}
+  RB_SUITE: ${{ inputs.suite }}
+  RB_BASELINE_REVIEWER: ${{ inputs.baseline_reviewer }}
+  RB_CANDIDATE_REVIEWER: ${{ inputs.candidate_reviewer }}
+  RB_BASELINE_GUARD: ${{ inputs.baseline_guard }}
+  RB_CANDIDATE_GUARD: ${{ inputs.candidate_guard }}
+  RB_PRICING_FILE: ${{ inputs.pricing_file }}
+  RB_BUDGET: ${{ inputs.budget }}
+  RB_PROMPT_PRICE_CAP: ${{ inputs.prompt_price_cap }}
+  RB_COMPLETION_PRICE_CAP: ${{ inputs.completion_price_cap }}
+
+jobs:
+  evaluate:
+    if: inputs.allow_live
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    outputs:
+      artifact_id: ${{ steps.candidate.outputs.artifact-id }}
+      evaluation_exit: ${{ steps.run.outputs.evaluation_exit }}
+    steps:
+      - name: Require the callee's immutable source context
+        env:
+          SOURCE_REPOSITORY: ${{ job.workflow_repository }}
+          SOURCE_SHA: ${{ job.workflow_sha }}
+        run: |
+          python3 - <<'PY'
+          import os, re
+          assert re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", os.environ["SOURCE_REPOSITORY"])
+          assert re.fullmatch(r"[0-9a-f]{40}", os.environ["SOURCE_SHA"])
+          PY
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: harness
+          persist-credentials: false
+      - name: Reject unsupported events and paid forks before loading keys
+        run: python3 harness/src/review_boundary/actions.py check
+      - name: Read approved caller data from the trusted base revision
+        if: inputs.baseline_source == 'caller'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha || github.sha }}
+          path: baseline-source
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.10.2"
+          python-version: "3.11"
+          enable-cache: false
+      - run: uv sync --frozen
+        working-directory: harness
+      - name: Require opt-in and fixed native provider options before loading keys
+        working-directory: harness
+        run: uv run --frozen python -m review_boundary.actions native-model-check
+      - name: Execute the trusted native provider runner
+        id: run
+        continue-on-error: true
+        working-directory: harness
+        env:
+          OPENROUTER_API_KEY: ${{ inputs.allow_live && inputs.provider == 'openrouter' && secrets.OPENROUTER_API_KEY || '' }}
+          OPENAI_API_KEY: ${{ inputs.allow_live && inputs.provider == 'openai' && secrets.OPENAI_API_KEY || '' }}
+          ANTHROPIC_API_KEY: ${{ inputs.allow_live && inputs.provider == 'anthropic' && secrets.ANTHROPIC_API_KEY || '' }}
+        run: uv run --frozen python -m review_boundary.actions native-model-run
+      - name: Transfer only the bounded candidate report
+        id: candidate
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ inputs.artifact_name }}-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: native-model-results/candidate/report.json
+          if-no-files-found: error
+          retention-days: 14
+      - name: Enforce provider execution status
+        if: always()
+        env:
+          RESULT_CODE: ${{ steps.run.outputs.evaluation_exit }}
+        run: |
+          python3 - <<'PY'
+          import os
+          raise SystemExit(0 if os.environ["RESULT_CODE"] == "0" else 2)
+          PY
+
+  compare:
+    needs: evaluate
+    if: always() && inputs.allow_live && needs.evaluate.outputs.artifact_id != ''
+    # This fresh runner receives report data only and has no provider or App secrets.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      artifact_id: ${{ steps.artifacts.outputs.artifact-id }}
+      comparison_ready: ${{ steps.run.outputs.comparison_ready == 'true' && steps.artifacts.outcome == 'success' }}
+    steps:
+      - name: Require the callee's immutable source context
+        env:
+          SOURCE_REPOSITORY: ${{ job.workflow_repository }}
+          SOURCE_SHA: ${{ job.workflow_sha }}
+        run: |
+          python3 - <<'PY'
+          import os, re
+          assert re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", os.environ["SOURCE_REPOSITORY"])
+          assert re.fullmatch(r"[0-9a-f]{40}", os.environ["SOURCE_SHA"])
+          PY
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: harness
+          persist-credentials: false
+      - name: Reload approved caller data from the trusted base revision
+        if: inputs.baseline_source == 'caller'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha || github.sha }}
+          path: baseline-source
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.10.2"
+          python-version: "3.11"
+          enable-cache: false
+      - run: uv sync --frozen
+        working-directory: harness
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          artifact-ids: ${{ needs.evaluate.outputs.artifact_id }}
+          merge-multiple: true
+          path: native-model-artifact
+      - name: Compare native report data without provider access
+        id: run
+        continue-on-error: true
+        working-directory: harness
+        env:
+          RB_EVALUATION_EXIT: ${{ needs.evaluate.outputs.evaluation_exit }}
+        run: uv run --frozen python -m review_boundary.actions native-model-compare
+      - name: Add the trusted comparison summary
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          summary = Path("reviewboundary-results/summary.md")
+          content = summary.read_text() if summary.is_file() else "# ReviewBoundary CI\n\n**ERROR**\n\nComparison did not start.\n"
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as stream:
+              stream.write(content)
+          PY
+      - name: Preserve only native report and trusted comparison results
+        id: artifacts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ inputs.artifact_name }}-comparison-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            native-model-artifact/report.json
+            reviewboundary-results/summary.md
+            reviewboundary-results/ci-result.json
+            reviewboundary-results/comparison.json
+          if-no-files-found: error
+          retention-days: 14
+      - name: Enforce the native comparison gate
+        if: always()
+        env:
+          RESULT_CODE: ${{ steps.run.outputs.exit_code }}
+        run: |
+          python3 - <<'PY'
+          import os
+          code = os.environ["RESULT_CODE"]
+          raise SystemExit(int(code) if code in ("0", "1", "2") else 2)
+          PY

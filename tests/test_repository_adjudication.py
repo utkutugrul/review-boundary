@@ -5,13 +5,14 @@ import stat
 
 import pytest
 from inspect_ai import eval
-from inspect_ai.log import read_eval_log
+from inspect_ai.log import list_eval_logs, read_eval_log
 from inspect_ai.model import ChatCompletionChoice, ChatMessageAssistant, ModelOutput, get_model
 from inspect_ai.tool import ToolCall
 
 from review_boundary.cli import main
 from review_boundary.provenance import json_digest
 from review_boundary.repository_adjudication import (
+    FAILURE_EVIDENCE_FILENAME,
     TEMPLATE_REASON,
     RepositoryAdjudicationArtifact,
     adjudicate_observation,
@@ -19,8 +20,10 @@ from review_boundary.repository_adjudication import (
     canonical_report_digest,
     export_adjudication_template,
     observations_from_logs,
+    repository_failure_evidence,
     validate_adjudication,
     write_new_text,
+    write_repository_failure_evidence,
 )
 from review_boundary.repository_cases import (
     REPOSITORY_SCORING_VERSION,
@@ -35,7 +38,9 @@ SUMMARY = "Distinctive tenant boundary summary 7f3a."
 CASES = build_repository_demo_cases()
 
 
-def reviewer_model(*, always_find=False, duplicate_findings=False):
+def reviewer_model(
+    *, always_find=False, duplicate_findings=False, model_name="adjudication-fixture"
+):
     def respond(input, tools, tool_choice, config):
         case, world = context()
         events = world.events
@@ -84,7 +89,7 @@ def reviewer_model(*, always_find=False, duplicate_findings=False):
             ],
         )
 
-    return get_model("mockllm/adjudication-fixture", custom_outputs=respond, memoize=False)
+    return get_model(f"mockllm/{model_name}", custom_outputs=respond, memoize=False)
 
 
 def native_run(tmp_path, *, always_find=False, duplicate_findings=False, cases=CASES):
@@ -125,6 +130,85 @@ def run(tmp_path):
     logs, report, output = native_run(tmp_path)
     observations, limits = observations_from_logs(logs, CASES)
     return report, observations, limits, output
+
+
+@pytest.fixture
+def mixed_run(tmp_path, monkeypatch):
+    """Use the real runner and Inspect for one healthy model plus pre-log failure."""
+    from review_boundary import repository_runner
+    from review_boundary.model_safety import ProviderRequestError
+
+    monkeypatch.setenv("OPENAI_API_KEY", "synthetic-adjudication-key")
+    original_prepare = repository_runner.prepare_provider
+
+    class MockPlan:
+        def __init__(self, plan):
+            self.plan = plan
+
+        def __getattr__(self, name):
+            return getattr(self.plan, name)
+
+        def inspect_model_id(self, model_id):
+            return f"mockllm/{model_id}"
+
+    monkeypatch.setattr(
+        repository_runner,
+        "prepare_provider",
+        lambda *args, **kwargs: MockPlan(original_prepare(*args, **kwargs)),
+    )
+
+    def model(plan, model_id):
+        if model_id == "failed":
+            raise ProviderRequestError("Synthetic provider initialization failure.")
+        return reviewer_model(model_name=model_id)
+
+    monkeypatch.setattr(repository_runner, "guarded_model", model)
+    pricing = tmp_path / "pricing.json"
+    pricing.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "provider": "openai",
+                "source": "https://openai.com/api/pricing/",
+                "as_of": "2026-01-01",
+                "models": {
+                    name: {"input_usd_per_million": 1, "output_usd_per_million": 2}
+                    for name in ("healthy", "failed")
+                },
+            }
+        )
+    )
+    output = tmp_path / "mixed"
+    assert (
+        main(
+            [
+                "repository-run-model",
+                "--provider",
+                "openai",
+                "--model",
+                "healthy",
+                "--model",
+                "failed",
+                "--epochs",
+                "1",
+                "--pricing-file",
+                str(pricing),
+                "--output",
+                str(output),
+                "--ledger",
+                str(tmp_path / "budget.json"),
+            ]
+        )
+        == 2
+    )
+    report = json.loads((output / "report.json").read_text())
+    logs = [read_eval_log(info.name) for info in list_eval_logs(str(output / "logs"))]
+    observations, limits = observations_from_logs(logs, CASES)
+    evidence = json.loads((output / "logs" / FAILURE_EVIDENCE_FILENAME).read_text())
+    assert len(observations) == len(CASES)
+    assert report["summary"]["errors"] == len(CASES)
+    assert report["metadata"]["run_finished"] is True
+    return report, observations, limits, output, evidence, logs
 
 
 def decide(artifact, *, findings=None, reviews=None):
@@ -505,6 +589,357 @@ def test_failed_rows_are_neither_exported_nor_adjudicable(run):
         apply_repository_adjudication(
             failed, CASES, template.model_dump(mode="json"), observations, limits
         )
+
+
+def test_mixed_provider_failure_requires_independent_evidence_and_preserves_failed_rows(mixed_run):
+    report, observations, limits, output, evidence, _ = mixed_run
+    before = copy.deepcopy(report)
+    template = export_adjudication_template(report, CASES)
+    assert len(template.review_decisions) == len(CASES)
+    decisions = decide(
+        template,
+        findings=lambda _: {
+            "decision": "supported",
+            "issue_id": "tenant-ownership",
+            "reason": "ok",
+        },
+        reviews=lambda _: {"decision": "supported", "reason": "ok"},
+    )
+    # Existing mixed reports without independent trusted run evidence stay closed.
+    with pytest.raises(ValueError, match="observation is missing"):
+        apply_repository_adjudication(report, CASES, decisions, observations, limits)
+    rows, metadata = apply_repository_adjudication(
+        report, CASES, decisions, observations, limits, failure_evidence=evidence
+    )
+    assert report == before
+    assert metadata["adjudication"]["rows_adjudicated"] == len(CASES)
+    assert metadata["adjudication"]["failure_evidence_sha256"] == json_digest(evidence)
+    for row, original in zip(rows, report["rows"], strict=True):
+        if row["reviewer"] == "mockllm/failed":
+            assert json.dumps(row) == json.dumps(original)
+            assert row["semantic_passed"] is None
+            assert row["review_adjudication"] is None
+            assert row["completed"] is False and row["conclusive"] is False
+        else:
+            assert row["semantic_passed"] is True
+    if os.name == "posix":
+        assert stat.S_IMODE((output / "logs" / FAILURE_EVIDENCE_FILENAME).stat().st_mode) == 0o600
+    ledger = json.loads((output.parent / "budget.json").read_text())
+    assert "settled_usd" not in ledger["runs"][0]
+    assert not (output / "settlement.json").exists()
+
+
+def test_mixed_provider_failure_cli_uses_only_explicit_trusted_log_directory(mixed_run, tmp_path):
+    report, _, _, source, _, _ = mixed_run
+    labels = tmp_path / "labels.json"
+    labels.write_text(export_adjudication_template(report, CASES).model_dump_json())
+    output = tmp_path / "adjudicated"
+    argv = [
+        "adjudication-apply",
+        "--report",
+        str(source / "report.json"),
+        "--suite",
+        str(source / "suite.json"),
+        "--adjudication",
+        str(labels),
+        "--logs",
+        str(source / "logs"),
+        "--output",
+        str(output),
+    ]
+    assert main(argv) == 0
+    result = json.loads((output / "report.json").read_text())
+    assert result["summary"]["semantically_adjudicated"] == 0
+    assert result["summary"]["errors"] == len(CASES)
+    assert result["metadata"]["adjudication"]["rows_adjudicated"] == len(CASES)
+    assert json.loads((source / "report.json").read_text()) == report
+
+    # An artifact beside the report is not authority for individually supplied logs.
+    sidecar = source / "logs" / FAILURE_EVIDENCE_FILENAME
+    (source / FAILURE_EVIDENCE_FILENAME).write_bytes(sidecar.read_bytes())
+    log_file = next(iter(list_eval_logs(str(source / "logs")))).name
+    argv[argv.index("--logs") + 1] = log_file
+    argv[argv.index("--output") + 1] = str(tmp_path / "not-created")
+    assert main(argv) == 2
+    assert not (tmp_path / "not-created").exists()
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        lambda value: value.update(schema_version=True),
+        lambda value: value.update(schema_version=1.0),
+        lambda value: value.update(evidence_kind="repository"),
+        lambda value: value.update(run_id="different-run"),
+        lambda value: value.update(source_report_sha256="0" * 64),
+        lambda value: value.update(suite_sha256="0" * 64),
+        lambda value: value.update(world_limits_sha256="0" * 64),
+        lambda value: value["failures"].pop(),
+        lambda value: value["failures"].append(copy.deepcopy(value["failures"][0])),
+        lambda value: value["failures"][0].update(reviewer="undeclared"),
+        lambda value: value["failures"][0].update(case_sha256="0" * 64),
+        lambda value: value["failures"][0].update(epoch=True),
+        lambda value: value["failures"][0].update(epoch=1.0),
+        lambda value: value["failures"][0].update(error_code="invalid_eval_log"),
+        lambda value: value["failures"][0].update(source_row_sha256="0" * 64),
+        lambda value: value.update(failures=[]),
+        lambda value: value.update(extra="not allowed"),
+    ],
+)
+def test_mixed_failure_evidence_requires_exact_run_and_complete_slots(mixed_run, change):
+    report, observations, limits, _, evidence, _ = mixed_run
+    altered = copy.deepcopy(evidence)
+    change(altered)
+    template = export_adjudication_template(report, CASES)
+    with pytest.raises(ValueError):
+        apply_repository_adjudication(
+            report, CASES, template, observations, limits, failure_evidence=altered
+        )
+
+
+@pytest.mark.parametrize("finished", [False, 1, None])
+def test_failure_evidence_never_authorizes_interim_or_nonboolean_finished_report(
+    mixed_run, finished
+):
+    report, observations, limits, _, evidence, _ = mixed_run
+    edited = copy.deepcopy(report)
+    edited["metadata"]["run_finished"] = finished
+    evidence = {**evidence, "source_report_sha256": canonical_report_digest(edited)}
+    template = export_adjudication_template(edited, CASES)
+    with pytest.raises(ValueError, match="completed run"):
+        apply_repository_adjudication(
+            edited, CASES, template, observations, limits, failure_evidence=evidence
+        )
+
+
+def test_failure_evidence_cannot_hide_missing_or_extra_native_observations(mixed_run):
+    report, observations, limits, _, evidence, _ = mixed_run
+    template = export_adjudication_template(report, CASES)
+    missing = dict(observations)
+    missing.pop(next(iter(missing)))
+    with pytest.raises(ValueError, match="observation is missing"):
+        apply_repository_adjudication(
+            report, CASES, template, missing, limits, failure_evidence=evidence
+        )
+    failed = evidence["failures"][0]
+    slot = (failed["case_sha256"], failed["reviewer"], failed["epoch"])
+    overlap = {**observations, slot: next(iter(observations.values()))}
+    with pytest.raises(ValueError, match="conflicts"):
+        apply_repository_adjudication(
+            report, CASES, template, overlap, limits, failure_evidence=evidence
+        )
+    foreign = {**observations, ("0" * 64, "foreign", 1): next(iter(observations.values()))}
+    with pytest.raises(ValueError, match="undeclared report slot"):
+        apply_repository_adjudication(
+            report, CASES, template, foreign, limits, failure_evidence=evidence
+        )
+
+
+def test_self_consistent_noncanonical_provider_error_rows_are_rejected(mixed_run):
+    report, observations, limits, _, evidence, _ = mixed_run
+    edited, evidence = copy.deepcopy(report), copy.deepcopy(evidence)
+    victim = next(row for row in edited["rows"] if row["reviewer"] == "mockllm/failed")
+    victim["tool_calls"] = 1
+    record = next(
+        item for item in evidence["failures"] if item["case_sha256"] == victim["case_sha256"]
+    )
+    record["source_row_sha256"] = json_digest(victim)
+    evidence["source_report_sha256"] = canonical_report_digest(edited)
+    template = export_adjudication_template(edited, CASES)
+    with pytest.raises(ValueError, match="exact failed sample rows"):
+        apply_repository_adjudication(
+            edited, CASES, template, observations, limits, failure_evidence=evidence
+        )
+
+
+def test_report_only_replacement_of_healthy_reviewer_cannot_forge_failure_evidence(mixed_run):
+    from review_boundary.repository_runner import repository_error_rows
+
+    report, _, limits, _, evidence, _ = mixed_run
+    edited = copy.deepcopy(report)
+    edited["rows"] = [
+        *repository_error_rows(CASES, "mockllm/healthy", 1, "provider_error"),
+        *[row for row in edited["rows"] if row["reviewer"] == "mockllm/failed"],
+    ]
+    refresh_summary(edited)
+    template = export_adjudication_template(edited, CASES)
+    with pytest.raises(ValueError, match="completed run"):
+        apply_repository_adjudication(
+            edited, CASES, template, {}, limits, failure_evidence=evidence
+        )
+
+
+@pytest.mark.parametrize("run_kind", ["calibration", "adapter"])
+def test_failure_evidence_does_not_make_non_native_reports_adjudicable(mixed_run, run_kind):
+    report, observations, limits, _, evidence, _ = mixed_run
+    edited = copy.deepcopy(report)
+    edited["metadata"]["run_kind"] = run_kind
+    template = export_adjudication_template(report, CASES).model_dump(mode="json")
+    template["source_report_sha256"] = canonical_report_digest(edited)
+    with pytest.raises(ValueError, match="complete native model report contract"):
+        apply_repository_adjudication(
+            edited, CASES, template, observations, limits, failure_evidence=evidence
+        )
+
+
+@pytest.mark.parametrize("status", ["success", "error"])
+def test_failed_reviewer_inspect_logs_are_explicitly_rejected_not_filtered(
+    mixed_run, tmp_path, monkeypatch, status
+):
+    from review_boundary import repository_adjudication
+
+    report, _, _, source, _, logs = mixed_run
+    contradictory = logs[0].model_copy(deep=True)
+    contradictory.eval.model = "mockllm/failed"
+    contradictory.status = status
+    if status == "error":
+        contradictory.samples = []
+    monkeypatch.setattr(repository_adjudication, "_read_logs", lambda _: [*logs, contradictory])
+    labels = tmp_path / "labels.json"
+    labels.write_text(export_adjudication_template(report, CASES).model_dump_json())
+    destination = tmp_path / "not-created"
+    assert (
+        main(
+            [
+                "adjudication-apply",
+                "--report",
+                str(source / "report.json"),
+                "--suite",
+                str(source / "suite.json"),
+                "--adjudication",
+                str(labels),
+                "--logs",
+                str(source / "logs"),
+                "--output",
+                str(destination),
+            ]
+        )
+        == 2
+    )
+    assert not destination.exists()
+
+
+def test_all_failure_report_cannot_become_adjudicable_without_a_native_observation(mixed_run):
+    from review_boundary.repository_runner import repository_error_rows
+
+    report, _, limits, _, _, _ = mixed_run
+    failed = copy.deepcopy(report)
+    reviewers = failed["metadata"]["reviewers"]
+    failed["rows"] = [
+        row
+        for reviewer in reviewers
+        for row in repository_error_rows(CASES, reviewer, 1, "provider_error")
+    ]
+    refresh_summary(failed)
+    evidence = repository_failure_evidence(failed, CASES, reviewers)
+    template = export_adjudication_template(failed, CASES)
+    with pytest.raises(ValueError, match="at least one native observation"):
+        apply_repository_adjudication(
+            failed, CASES, template, {}, limits, failure_evidence=evidence
+        )
+
+
+def test_failure_sidecar_is_exclusive_and_failed_write_leaves_no_partial_artifact(
+    mixed_run, tmp_path, monkeypatch
+):
+    from review_boundary import repository_adjudication
+
+    _, _, _, source, _, _ = mixed_run
+    path = source / "logs" / FAILURE_EVIDENCE_FILENAME
+    before = path.read_bytes()
+    with pytest.raises(FileExistsError):
+        write_repository_failure_evidence(
+            source / "report.json", CASES, ["mockllm/failed"], source / "logs"
+        )
+    assert path.read_bytes() == before
+
+    original_fdopen = repository_adjudication.os.fdopen
+
+    def fail(descriptor, mode="r", *args, **kwargs):
+        if mode == "w":
+            raise OSError("Synthetic descriptor wrapping failure.")
+        return original_fdopen(descriptor, mode, *args, **kwargs)
+
+    monkeypatch.setattr(repository_adjudication.os, "fdopen", fail)
+    destination = tmp_path / "new-logs"
+    with pytest.raises(OSError, match="Synthetic descriptor"):
+        write_repository_failure_evidence(
+            source / "report.json", CASES, ["mockllm/failed"], destination
+        )
+    assert not (destination / FAILURE_EVIDENCE_FILENAME).exists()
+    assert path.read_bytes() == before
+
+
+def test_failure_sidecar_reader_rejects_duplicates_symlinks_and_nonregular_inputs(
+    mixed_run, tmp_path
+):
+    from review_boundary.repository_adjudication import _read_failure_evidence
+
+    _, _, _, source, evidence, _ = mixed_run
+    assert _read_failure_evidence([source / "logs"]).model_dump(mode="json") == evidence
+    with pytest.raises(ValueError, match="Only one"):
+        _read_failure_evidence([source / "logs", source / "logs"])
+    directory = tmp_path / "supplied-logs"
+    directory.mkdir()
+    candidate = directory / FAILURE_EVIDENCE_FILENAME
+    candidate.symlink_to(source / "logs" / FAILURE_EVIDENCE_FILENAME)
+    with pytest.raises(ValueError, match="symlinks"):
+        _read_failure_evidence([directory])
+    candidate.unlink()
+    candidate.mkdir()
+    with pytest.raises(ValueError, match="regular file"):
+        _read_failure_evidence([directory])
+
+
+@pytest.mark.parametrize(
+    "raw", [b'{"schema_version":', b'{"schema_version":1,"schema_version":1}', b'{"value":NaN}']
+)
+def test_failure_sidecar_reader_rejects_truncated_or_ambiguous_json(tmp_path, raw):
+    from review_boundary.repository_adjudication import _read_failure_evidence
+
+    path = tmp_path / FAILURE_EVIDENCE_FILENAME
+    path.write_bytes(raw)
+    with pytest.raises(ValueError):
+        _read_failure_evidence([tmp_path])
+
+
+def test_failure_sidecar_reader_rejects_oversized_file(tmp_path):
+    from review_boundary.json_input import MAX_REPORT_BYTES
+    from review_boundary.repository_adjudication import _read_failure_evidence
+
+    path = tmp_path / FAILURE_EVIDENCE_FILENAME
+    with path.open("wb") as stream:
+        stream.truncate(MAX_REPORT_BYTES + 1)
+    with pytest.raises(ValueError, match="bounded regular file"):
+        _read_failure_evidence([tmp_path])
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="FIFO requires POSIX")
+def test_failure_sidecar_reader_rejects_fifo_without_waiting_for_a_writer(tmp_path):
+    from review_boundary.repository_adjudication import _read_failure_evidence
+
+    os.mkfifo(tmp_path / FAILURE_EVIDENCE_FILENAME)
+    with pytest.raises(ValueError, match="bounded regular file"):
+        _read_failure_evidence([tmp_path])
+
+
+def test_failure_sidecar_reader_rejects_replaced_file_before_read(mixed_run, monkeypatch):
+    from review_boundary import repository_adjudication
+
+    _, _, _, source, _, _ = mixed_run
+    path = source / "logs" / FAILURE_EVIDENCE_FILENAME
+    replacement = path.with_suffix(".replacement")
+    replacement.write_bytes(path.read_bytes())
+    original_open = repository_adjudication.os.open
+
+    def replace(selected, flags, *args, **kwargs):
+        if selected == path:
+            replacement.replace(path)
+        return original_open(selected, flags, *args, **kwargs)
+
+    monkeypatch.setattr(repository_adjudication.os, "open", replace)
+    with pytest.raises(ValueError, match="changed"):
+        repository_adjudication._read_failure_evidence([source / "logs"])
 
 
 def test_missing_or_foreign_observation_fails_closed(run):

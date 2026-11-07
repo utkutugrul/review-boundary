@@ -1,4 +1,4 @@
-"""Trusted reusable-workflow entry points; never execute code from caller repositories."""
+"""Reusable-workflow entry points with separate provider and caller-adapter paths."""
 
 import json
 import os
@@ -63,6 +63,8 @@ def evaluate(environ):
     from .ci import repository_file, run_ci
 
     context(environ)
+    if environ.get("RB_PROFILE", "legacy") != "legacy":
+        raise WorkflowError("Caller adapters require the separate secretless adapter workflow")
     workspace = Path(environ["GITHUB_WORKSPACE"])
     data_root = workspace / (
         "baseline-source" if environ.get("RB_BASELINE_SOURCE") == "caller" else "harness"
@@ -87,6 +89,8 @@ def publish(environ):
     from .cli import main as cli_main
 
     selected = context(environ)
+    if environ.get("RB_PROFILE", "legacy") != "legacy":
+        raise WorkflowError("Native App publication is not supported")
     if not selected["pull_number"] or selected.get("fork"):
         raise WorkflowError("App reporting requires a pull request from the same repository")
     key = environ.get("RB_APP_PRIVATE_KEY", "")
@@ -126,6 +130,163 @@ def publish(environ):
         )
 
 
+def adapter_context(environ):
+    from .ci import ADAPTER_PROFILES, adapter_environment
+
+    selected = context(environ)
+    if (
+        environ.get("RB_PROFILE") not in ADAPTER_PROFILES
+        or selected["mode"] != "calibration"
+        or environ.get("RB_MODEL")
+        or environ.get("RB_PRICING_FILE")
+        or environ.get("RB_PUBLISH_COMMENT", "false") != "false"
+    ):
+        raise WorkflowError("Select a native adapter profile without model or publication options")
+    adapter_environment(environ)
+    return selected
+
+
+def _adapter_inputs(environ):
+    from .ci import repository_file
+
+    workspace = Path(environ["GITHUB_WORKSPACE"])
+    data_root = workspace / (
+        "baseline-source" if environ.get("RB_BASELINE_SOURCE") == "caller" else "harness"
+    )
+    baseline = repository_file(data_root, environ["RB_BASELINE"])
+    return baseline, {
+        "profile": environ["RB_PROFILE"],
+        "suite_path": repository_file(data_root, environ["RB_SUITE"]),
+        "baseline_reviewer": environ.get("RB_BASELINE_REVIEWER") or None,
+        "candidate_reviewer": environ.get("RB_CANDIDATE_REVIEWER") or None,
+        "baseline_guard": environ.get("RB_BASELINE_GUARD") or None,
+        "candidate_guard": environ.get("RB_CANDIDATE_GUARD") or None,
+    }
+
+
+def adapter_run(environ):
+    from .ci import execute_adapter_ci, repository_file
+
+    adapter_context(environ)
+    baseline, options = _adapter_inputs(environ)
+    workspace = Path(environ["GITHUB_WORKSPACE"])
+    config = repository_file(workspace / "adapter-source", environ["RB_ADAPTER"])
+    return execute_adapter_ci(
+        baseline, workspace / "adapter-results", adapter_path=config, **options
+    )
+
+
+def adapter_compare(environ):
+    from .ci import compare_native_ci
+
+    adapter_context(environ)
+    baseline, options = _adapter_inputs(environ)
+    workspace = Path(environ["GITHUB_WORKSPACE"])
+    return compare_native_ci(
+        baseline,
+        workspace / "adapter-artifact/report.json",
+        workspace / "reviewboundary-results",
+        evaluation_code=0 if environ.get("RB_EVALUATION_EXIT") == "0" else 2,
+        **options,
+    )
+
+
+def native_model_context(environ):
+    from .ci import MODEL_PROFILES
+
+    selected = context(environ)
+    if environ.get("RB_ALLOW_LIVE", "false") != "true":
+        raise WorkflowError("Native provider execution requires explicit allow_live opt-in")
+    if (
+        environ.get("RB_PROFILE") not in MODEL_PROFILES
+        or selected["mode"] != "model"
+        or not environ.get("RB_MODEL")
+        or any(
+            environ.get(name)
+            for name in (
+                "RB_ADAPTER",
+                "RB_ADAPTER_PATH",
+                "RB_POLICY",
+                "RB_POLICY_PATH",
+                "RB_COMMAND",
+                "RB_OPENCODE_AUTH",
+                "RB_APP_ID",
+                "RB_INSTALLATION_ID",
+            )
+        )
+        or environ.get("RB_PUBLISH_COMMENT", "false") != "false"
+    ):
+        raise WorkflowError(
+            "Native provider CI accepts fixed model profiles without adapter or App options"
+        )
+    return selected
+
+
+def _native_model_inputs(environ):
+    from .ci import _safe_path, repository_file
+
+    workspace = _safe_path(environ["GITHUB_WORKSPACE"])
+    harness = _safe_path(workspace / "harness")
+    if Path.cwd() != harness.resolve(strict=True):
+        raise WorkflowError(
+            "Native provider operations must run from the trusted harness directory"
+        )
+    root = workspace / (
+        "baseline-source" if environ.get("RB_BASELINE_SOURCE") == "caller" else "harness"
+    )
+    return (
+        repository_file(root, environ["RB_BASELINE"]),
+        {
+            "profile": environ["RB_PROFILE"],
+            "suite_path": repository_file(root, environ["RB_SUITE"]),
+            "baseline_reviewer": environ.get("RB_BASELINE_REVIEWER") or None,
+            "candidate_reviewer": environ.get("RB_CANDIDATE_REVIEWER") or None,
+            "baseline_guard": environ.get("RB_BASELINE_GUARD") or None,
+            "candidate_guard": environ.get("RB_CANDIDATE_GUARD") or None,
+        },
+        root,
+    )
+
+
+def native_model_run(environ):
+    from .ci import execute_native_model_ci, repository_file
+
+    native_model_context(environ)
+    baseline, options, root = _native_model_inputs(environ)
+    pricing = environ.get("RB_PRICING_FILE")
+    return execute_native_model_ci(
+        baseline,
+        Path(environ["GITHUB_WORKSPACE"]) / "native-model-results",
+        mode="model",
+        provider=environ["RB_PROVIDER"],
+        model=environ["RB_MODEL"],
+        budget=float(environ["RB_BUDGET"]),
+        pricing_file=repository_file(root, pricing) if pricing else None,
+        prompt_price_cap=float(environ["RB_PROMPT_PRICE_CAP"])
+        if environ.get("RB_PROMPT_PRICE_CAP")
+        else None,
+        completion_price_cap=float(environ["RB_COMPLETION_PRICE_CAP"])
+        if environ.get("RB_COMPLETION_PRICE_CAP")
+        else None,
+        **options,
+    )
+
+
+def native_model_compare(environ):
+    from .ci import compare_native_ci
+
+    native_model_context(environ)
+    baseline, options, _ = _native_model_inputs(environ)
+    workspace = Path(environ["GITHUB_WORKSPACE"])
+    return compare_native_ci(
+        baseline,
+        workspace / "native-model-artifact/report.json",
+        workspace / "reviewboundary-results",
+        evaluation_code=0 if environ.get("RB_EVALUATION_EXIT") == "0" else 2,
+        **options,
+    )
+
+
 def main(argv=None):
     operation = (argv or sys.argv[1:] or [""])[0]
     code = 2
@@ -133,12 +294,26 @@ def main(argv=None):
         if operation == "check":
             context(os.environ)
             return 0
+        if operation == "adapter-check":
+            adapter_context(os.environ)
+            return 0
+        if operation == "native-model-check":
+            native_model_context(os.environ)
+            return 0
         if operation == "evaluate":
             code = evaluate(os.environ)
+        elif operation == "adapter-run":
+            code = adapter_run(os.environ)
+        elif operation == "adapter-compare":
+            code = adapter_compare(os.environ)
+        elif operation == "native-model-run":
+            code = native_model_run(os.environ)
+        elif operation == "native-model-compare":
+            code = native_model_compare(os.environ)
         elif operation == "publish":
             return publish(os.environ)
         else:
-            raise WorkflowError("Select check, evaluate, or publish")
+            raise WorkflowError("Select a supported evaluation, adapter, or publication operation")
     except WorkflowError as error:
         print(f"ReviewBoundary: {error}", file=sys.stderr)
     except Exception:  # noqa: BLE001
@@ -147,7 +322,10 @@ def main(argv=None):
             "ReviewBoundary: workflow execution failed; check configuration and artifacts",
             file=sys.stderr,
         )
-    if operation == "evaluate":
+    if operation in ("adapter-run", "native-model-run"):
+        with Path(os.environ["GITHUB_OUTPUT"]).open("a") as stream:
+            stream.write(f"evaluation_exit={code}\n")
+    if operation in ("evaluate", "adapter-compare", "native-model-compare"):
         output = Path(os.environ["GITHUB_WORKSPACE"]) / "reviewboundary-results"
         output.mkdir(parents=True, exist_ok=True)
         if not (output / "summary.md").exists():

@@ -257,11 +257,18 @@ def test_repository_model_rejects_symlinked_output_before_writes(tmp_path, kind)
     assert not (tmp_path / "model-budget.json").exists()
 
 
-@pytest.mark.parametrize("collision", ["ledger", "lock", "temporary", "report"])
+@pytest.mark.parametrize("collision", ["ledger", "lock", "temporary", "report", "failure-evidence"])
 def test_repository_model_rejects_output_and_ledger_artifact_collisions(tmp_path, collision):
-    if collision in {"ledger", "report"}:
+    if collision in {"ledger", "report", "failure-evidence"}:
         output = tmp_path / "model-result"
-        ledger = output / ("budget.json" if collision == "ledger" else "report.json")
+        ledger = (
+            output
+            / {
+                "ledger": "budget.json",
+                "report": "report.json",
+                "failure-evidence": "logs/repository-failures.json",
+            }[collision]
+        )
     else:
         ledger = tmp_path / "model-budget.json"
         output = ledger.with_suffix(".lock" if collision == "lock" else ".tmp")

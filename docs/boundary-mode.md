@@ -130,6 +130,8 @@ uv run --frozen review-boundary boundary-demo \
   --output runs/boundary-policy
 ```
 
+`boundary-run-adapter --suite path/to/suite.json` accepts the same bounded case envelope as native model mode. Omitting `--suite` retains the bundled cases and corpus identity. Adapter reports retain their full-case-list suite digest, while native model reports use case digests.
+
 `--policy` also works with `boundary-run-adapter`. Its configuration uses the same
 command, environment allowlist, source declaration and limit fields as a reviewer.
 A fresh process receives one JSON object with `protocol` set to

@@ -41,6 +41,8 @@ ADJUDICATION_SCHEMA_VERSION = 1
 TEMPLATE_REASON = "Awaiting evaluator adjudication."
 MAX_FINDING_DECISIONS = 32768
 MAX_REVIEW_DECISIONS = 4096
+MAX_FAILURE_SLOTS = 32768
+FAILURE_EVIDENCE_FILENAME = "repository-failures.json"
 
 Slot = tuple[str, str, int]
 
@@ -85,6 +87,41 @@ class TrustedRepositoryObservation(FrozenModel):
     source_row_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     write_requests_seen: int = Field(ge=0, le=100000)
     snapshot: RepositoryWorldSnapshot | None = None
+
+
+class RepositoryFailureSlot(FrozenModel):
+    """One explicit native-provider failure, without a fabricated world snapshot."""
+
+    case_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    reviewer: str = Field(min_length=1, max_length=512)
+    epoch: int = Field(ge=1, le=10)
+    error_code: Literal["provider_error"]
+    source_row_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class RepositoryFailureEvidence(FrozenModel):
+    """Trusted local run evidence, separate from the report and Inspect snapshots.
+
+    The caller must trust the supplied log directory and this runner-authored
+    artifact. Digest bindings establish consistency, not who authored the files.
+    Only provider failures that happen outside Inspect are supported. An invalid
+    evaluation log never becomes acceptable merely by labeling it a failure.
+    """
+
+    schema_version: Literal[1]
+    evidence_kind: Literal["repository_provider_failures"]
+    run_id: str = Field(min_length=1, max_length=512)
+    source_report_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    suite_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    world_limits_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    failures: tuple[RepositoryFailureSlot, ...] = Field(min_length=1, max_length=MAX_FAILURE_SLOTS)
+
+    @field_validator("schema_version", mode="before")
+    @classmethod
+    def integer_schema_version(cls, value):
+        if type(value) is not int:
+            raise ValueError("schema_version must be the integer 1")
+        return value
 
 
 def _strict(model, value):
@@ -308,6 +345,116 @@ def _json_type_exact(left, right) -> bool:
     return False
 
 
+def _trusted_failure_slots(
+    report: Mapping,
+    cases: Sequence[RepositoryCase],
+    evidence,
+    limits: RepositoryLimits,
+) -> frozenset[Slot]:
+    """Validate independent local failure evidence against exact generated rows."""
+    from .repository_runner import repository_error_rows
+
+    artifact = _strict(RepositoryFailureEvidence, evidence)
+    identities = _row_identities(report, cases)
+    metadata = report["metadata"]
+    if (
+        metadata.get("run_finished") is not True
+        or artifact.run_id != metadata.get("run_id")
+        or artifact.source_report_sha256 != canonical_report_digest(report)
+        or artifact.suite_sha256 != metadata.get("suite_sha256")
+        or artifact.world_limits_sha256 != json_digest(limits.model_dump(mode="json"))
+        or not _json_type_exact(metadata["world_limits"], limits.model_dump(mode="json"))
+    ):
+        raise ValueError("Provider failure evidence does not bind to this completed run.")
+    declared = {}
+    for record in artifact.failures:
+        slot = (record.case_sha256, record.reviewer, record.epoch)
+        if slot in declared:
+            raise ValueError("Provider failure evidence contains a duplicate sample slot.")
+        declared[slot] = record
+    failed_reviewers = {slot[1] for slot in declared}
+    if not failed_reviewers <= set(metadata["reviewers"]):
+        raise ValueError("Provider failure evidence contains an undeclared reviewer.")
+    expected = {}
+    for reviewer in sorted(failed_reviewers):
+        for source in repository_error_rows(
+            tuple(cases), reviewer, metadata["epochs"], "provider_error"
+        ):
+            slot = (source["case_sha256"], source["reviewer"], source["epoch"])
+            expected[slot] = source
+    if set(declared) != set(expected):
+        raise ValueError("Provider failure evidence must cover complete failed reviewer blocks.")
+    source_by_slot = {row.slot: report["rows"][row.index] for row in identities}
+    for slot, source in expected.items():
+        original = source_by_slot[slot]
+        if declared[slot].source_row_sha256 != json_digest(original) or not _json_type_exact(
+            original, source
+        ):
+            raise ValueError(
+                "Provider failure evidence does not match the exact failed sample rows."
+            )
+    return frozenset(declared)
+
+
+def repository_failure_evidence(
+    report: Mapping, cases: Sequence[RepositoryCase], failed_reviewers: Sequence[str]
+) -> RepositoryFailureEvidence:
+    """Build a separate artifact only for canonical, complete native provider failures.
+
+    This function is called by the trusted runner after its final report is
+    written. It does not make an arbitrary report or caller a trusted author.
+    """
+    identities = _row_identities(report, cases)
+    reviewers = tuple(failed_reviewers)
+    if not reviewers or len(set(reviewers)) != len(reviewers):
+        raise ValueError("Failed reviewers must be nonempty and unique.")
+    metadata = report["metadata"]
+    limits = _strict(RepositoryLimits, metadata["world_limits"])
+    artifact = RepositoryFailureEvidence(
+        schema_version=1,
+        evidence_kind="repository_provider_failures",
+        run_id=metadata.get("run_id"),
+        source_report_sha256=canonical_report_digest(report),
+        suite_sha256=metadata["suite_sha256"],
+        world_limits_sha256=json_digest(limits.model_dump(mode="json")),
+        failures=tuple(
+            RepositoryFailureSlot(
+                case_sha256=row.slot[0],
+                reviewer=row.slot[1],
+                epoch=row.slot[2],
+                error_code="provider_error",
+                source_row_sha256=json_digest(report["rows"][row.index]),
+            )
+            for row in identities
+            if row.slot[1] in reviewers
+        ),
+    )
+    _trusted_failure_slots(report, cases, artifact, limits)
+    return artifact
+
+
+def write_repository_failure_evidence(
+    report_path: Path,
+    cases: Sequence[RepositoryCase],
+    failed_reviewers: Sequence[str],
+    log_directory: Path,
+) -> Path:
+    """Write an exclusive private sidecar next to the runner's trusted logs."""
+    from .json_input import MAX_REPORT_BYTES, read_json_object
+    from .repository_runner import _path_without_symlinks
+
+    report = read_json_object(report_path)
+    artifact = repository_failure_evidence(report, cases, failed_reviewers)
+    document = json.dumps(artifact.model_dump(mode="json"), indent=2) + "\n"
+    if len(document.encode("utf-8")) > MAX_REPORT_BYTES:
+        raise ValueError("Provider failure evidence exceeds the file size limit.")
+    directory = _path_without_symlinks(log_directory, "provider failure log directory")
+    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    return write_new_text(
+        directory / FAILURE_EVIDENCE_FILENAME, document, "provider failure evidence"
+    )
+
+
 def validate_adjudication(
     adjudication,
     report: Mapping,
@@ -393,16 +540,33 @@ def apply_repository_adjudication(
     adjudication,
     observations: Mapping[Slot, TrustedRepositoryObservation],
     limits: RepositoryLimits,
+    *,
+    failure_evidence: RepositoryFailureEvidence | Mapping | None = None,
 ) -> tuple[list[dict], dict]:
     """Return new rows and metadata. The source report is never modified."""
     artifact = validate_adjudication(adjudication, report, cases)
     if "adjudication" in report["metadata"]:
         raise ValueError("Source report is already adjudicated.")
+    failed_slots = (
+        _trusted_failure_slots(report, cases, failure_evidence, limits)
+        if failure_evidence is not None
+        else frozenset()
+    )
+    if failed_slots.intersection(observations):
+        raise ValueError("A provider failure slot conflicts with a trusted scorer observation.")
+    identities = _row_identities(report, cases)
+    declared_slots = {row.slot for row in identities}
+    if set(observations) - declared_slots:
+        raise ValueError("A trusted scorer observation refers to an undeclared report slot.")
+    if failure_evidence is not None and not declared_slots - failed_slots:
+        raise ValueError("Provider failure evidence requires at least one native observation.")
     findings = {(d.case_sha256, d.finding_sha256): d for d in artifact.finding_decisions}
     reviews = {(d.case_sha256, d.review_sha256): d for d in artifact.review_decisions}
     rows, adjudicated = list(report["rows"]), 0
-    for row in _row_identities(report, cases):
+    for row in identities:
         case_hash = case_digest(row.case)
+        if row.slot in failed_slots:
+            continue
         if row.slot not in observations:
             raise ValueError("A trusted scorer observation is missing for a report row.")
         observation = _strict(TrustedRepositoryObservation, observations[row.slot])
@@ -440,6 +604,10 @@ def apply_repository_adjudication(
             "semantic_method": "explicit_evaluator_adjudication_only",
         },
     }
+    if failure_evidence is not None:
+        metadata["adjudication"]["failure_evidence_sha256"] = json_digest(
+            _strict(RepositoryFailureEvidence, failure_evidence).model_dump(mode="json")
+        )
     return rows, metadata
 
 
@@ -592,6 +760,53 @@ def _read_logs(paths: Sequence) -> list:
     return [read_eval_log(name) for name in names]
 
 
+def _read_failure_evidence(paths: Sequence) -> RepositoryFailureEvidence | None:
+    """Read only the fixed sidecar in explicitly supplied trusted log directories.
+
+    Treating a directory as trusted is the caller's local-input decision, just
+    as it is for Inspect logs. No artifact beside an untrusted report is loaded.
+    A sidecar never authorizes ignoring a contradictory native Inspect log.
+    """
+    from .json_input import MAX_REPORT_BYTES, parse_json_object
+    from .repository_runner import _path_without_symlinks
+
+    found = []
+    for path in paths:
+        if path.is_dir():
+            candidate = path / FAILURE_EVIDENCE_FILENAME
+            # lexists also detects dangling links rather than silently ignoring them.
+            if os.path.lexists(candidate):
+                found.append(_path_without_symlinks(candidate, "provider failure evidence"))
+    if len(found) > 1:
+        raise ValueError("Only one provider failure evidence artifact may be supplied.")
+    if not found:
+        return None
+    path = found[0]
+    initial = path.lstat()
+    if not stat.S_ISREG(initial.st_mode) or initial.st_size > MAX_REPORT_BYTES:
+        raise ValueError("Provider failure evidence must be a bounded regular file.")
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    descriptor = os.open(path, flags)
+    try:
+        current = os.fstat(descriptor)
+        selected = path.lstat()
+        if (
+            not stat.S_ISREG(current.st_mode)
+            or not stat.S_ISREG(selected.st_mode)
+            or current.st_size > MAX_REPORT_BYTES
+            or (initial.st_dev, initial.st_ino) != (current.st_dev, current.st_ino)
+            or (selected.st_dev, selected.st_ino) != (current.st_dev, current.st_ino)
+        ):
+            raise ValueError("Provider failure evidence changed or exceeded its file bound.")
+        with os.fdopen(descriptor, "rb", closefd=False) as stream:
+            raw = stream.read(MAX_REPORT_BYTES + 1)
+    finally:
+        os.close(descriptor)
+    if len(raw) > MAX_REPORT_BYTES:
+        raise ValueError("Provider failure evidence exceeds its file bound.")
+    return _strict(RepositoryFailureEvidence, parse_json_object(raw))
+
+
 def export_adjudication_command(args) -> int:
     from .json_input import read_json_object
     from .repository_runner import load_suite
@@ -620,11 +835,17 @@ def apply_adjudication_command(args) -> int:
     report = read_json_object(args.report)
     cases = load_suite(args.suite)
     adjudication = read_json_object(args.adjudication)
-    observations, limits = observations_from_logs(_read_logs(args.logs), cases)
+    failure_evidence = _read_failure_evidence(args.logs)
+    logs = _read_logs(args.logs)
+    if failure_evidence is not None:
+        failed_reviewers = {record.reviewer for record in failure_evidence.failures}
+        if any(log.eval.model in failed_reviewers for log in logs):
+            raise ValueError("Provider failure evidence conflicts with supplied Inspect logs.")
+    observations, limits = observations_from_logs(logs, cases)
     if report.get("metadata", {}).get("world_limits") != limits.model_dump(mode="json"):
         raise ValueError("Report world limits do not match the trusted logs.")
     rows, metadata = apply_repository_adjudication(
-        report, cases, adjudication, observations, limits
+        report, cases, adjudication, observations, limits, failure_evidence=failure_evidence
     )
     output.parent.mkdir(parents=True, exist_ok=True)
     output.mkdir(mode=0o700)

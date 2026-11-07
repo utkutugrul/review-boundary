@@ -1,0 +1,231 @@
+name: Reusable native adapter evaluation
+
+on:
+  workflow_call:
+    outputs:
+      artifact_id:
+        description: Immutable ID of the uploaded native comparison artifact
+        value: ${{ jobs.compare.outputs.artifact_id }}
+      comparison_ready:
+        description: Whether a completed native comparison was uploaded
+        value: ${{ jobs.compare.outputs.comparison_ready }}
+    inputs:
+      profile:
+        description: repository-adapter or boundary-adapter; executes trusted caller-owned code
+        type: string
+        required: true
+      baseline:
+        description: Approved report JSON path in the selected data repository
+        type: string
+        required: true
+      baseline_source:
+        description: harness or caller; caller data is read from the PR base commit
+        type: string
+        default: caller
+      suite:
+        description: Explicit bounded suite JSON path in the baseline data repository
+        type: string
+        required: true
+      adapter:
+        description: Bounded argv configuration JSON path in the caller head checkout
+        type: string
+        required: true
+      baseline_reviewer:
+        type: string
+        required: true
+      candidate_reviewer:
+        description: adapter/ followed by the configured adapter name
+        type: string
+        required: true
+      baseline_guard:
+        description: Required on or off for boundary-adapter
+        type: string
+        default: ""
+      candidate_guard:
+        description: Required on or off for boundary-adapter
+        type: string
+        default: ""
+      artifact_name:
+        type: string
+        default: reviewboundary-adapter
+    # No secrets are accepted. Callers must not use secrets: inherit for this workflow.
+
+permissions:
+  contents: read
+
+env:
+  RB_SERVER_URL: ${{ github.server_url }}
+  RB_EVENT: ${{ github.event_name }}
+  RB_REPOSITORY: ${{ github.repository }}
+  RB_PROFILE: ${{ inputs.profile }}
+  RB_BASELINE: ${{ inputs.baseline }}
+  RB_BASELINE_SOURCE: ${{ inputs.baseline_source }}
+  RB_SUITE: ${{ inputs.suite }}
+  RB_ADAPTER: ${{ inputs.adapter }}
+  RB_BASELINE_REVIEWER: ${{ inputs.baseline_reviewer }}
+  RB_CANDIDATE_REVIEWER: ${{ inputs.candidate_reviewer }}
+  RB_BASELINE_GUARD: ${{ inputs.baseline_guard }}
+  RB_CANDIDATE_GUARD: ${{ inputs.candidate_guard }}
+
+jobs:
+  adapter:
+    # A fresh GitHub-hosted runner, never a provider or App job reused for adapter code.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    outputs:
+      artifact_id: ${{ steps.candidate.outputs.artifact-id }}
+      evaluation_exit: ${{ steps.run.outputs.evaluation_exit }}
+    steps:
+      - name: Require the callee's immutable source context
+        env:
+          SOURCE_REPOSITORY: ${{ job.workflow_repository }}
+          SOURCE_SHA: ${{ job.workflow_sha }}
+        run: |
+          python3 - <<'PY'
+          import os, re
+          assert re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", os.environ["SOURCE_REPOSITORY"])
+          assert re.fullmatch(r"[0-9a-f]{40}", os.environ["SOURCE_SHA"])
+          PY
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: harness
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.10.2"
+          python-version: "3.11"
+          enable-cache: false
+      - run: uv sync --frozen
+        working-directory: harness
+      - name: Check the secretless adapter profile before selecting caller code
+        working-directory: harness
+        run: uv run --frozen python -m review_boundary.actions adapter-check
+      - name: Read approved caller baseline and suite data from the trusted base
+        if: inputs.baseline_source == 'caller'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha || github.sha }}
+          path: baseline-source
+          persist-credentials: false
+      - name: Select the caller-owned adapter at the exact evaluated head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          path: adapter-source
+          persist-credentials: false
+      - name: Run the caller-owned adapter without provider or App credentials
+        id: run
+        continue-on-error: true
+        working-directory: harness
+        run: uv run --frozen python -m review_boundary.actions adapter-run
+      - name: Transfer only candidate JSON data
+        id: candidate
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ inputs.artifact_name }}-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: adapter-results/candidate/report.json
+          if-no-files-found: error
+          retention-days: 14
+      - name: Enforce adapter execution status
+        if: always()
+        env:
+          RESULT_CODE: ${{ steps.run.outputs.evaluation_exit }}
+        run: |
+          python3 - <<'PY'
+          import os
+          raise SystemExit(0 if os.environ["RESULT_CODE"] == "0" else 2)
+          PY
+
+  compare:
+    needs: adapter
+    if: always() && needs.adapter.outputs.artifact_id != ''
+    # This separate runner receives data only and never checks out caller adapter code.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      artifact_id: ${{ steps.artifacts.outputs.artifact-id }}
+      comparison_ready: ${{ steps.run.outputs.comparison_ready == 'true' && steps.artifacts.outcome == 'success' }}
+    steps:
+      - name: Require the callee's immutable source context
+        env:
+          SOURCE_REPOSITORY: ${{ job.workflow_repository }}
+          SOURCE_SHA: ${{ job.workflow_sha }}
+        run: |
+          python3 - <<'PY'
+          import os, re
+          assert re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", os.environ["SOURCE_REPOSITORY"])
+          assert re.fullmatch(r"[0-9a-f]{40}", os.environ["SOURCE_SHA"])
+          PY
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: harness
+          persist-credentials: false
+      - name: Read approved caller baseline and suite data from the trusted base
+        if: inputs.baseline_source == 'caller'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha || github.sha }}
+          path: baseline-source
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.10.2"
+          python-version: "3.11"
+          enable-cache: false
+      - run: uv sync --frozen
+        working-directory: harness
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          artifact-ids: ${{ needs.adapter.outputs.artifact_id }}
+          merge-multiple: true
+          path: adapter-artifact
+      - name: Compare bounded native data without executing the caller adapter
+        id: run
+        continue-on-error: true
+        working-directory: harness
+        env:
+          RB_EVALUATION_EXIT: ${{ needs.adapter.outputs.evaluation_exit }}
+        run: uv run --frozen python -m review_boundary.actions adapter-compare
+      - name: Add the trusted comparison summary
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          summary = Path("reviewboundary-results/summary.md")
+          content = summary.read_text() if summary.is_file() else "# ReviewBoundary CI\n\n**ERROR**\n\nComparison did not start.\n"
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as stream:
+              stream.write(content)
+          PY
+      - name: Preserve trusted comparison results
+        id: artifacts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ inputs.artifact_name }}-comparison-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            reviewboundary-results/summary.md
+            reviewboundary-results/ci-result.json
+            reviewboundary-results/comparison.json
+          if-no-files-found: error
+          retention-days: 14
+      - name: Enforce the native comparison gate
+        if: always()
+        env:
+          RESULT_CODE: ${{ steps.run.outputs.exit_code }}
+        run: |
+          python3 - <<'PY'
+          import os
+          code = os.environ["RESULT_CODE"]
+          raise SystemExit(int(code) if code in ("0", "1", "2") else 2)
+          PY

@@ -7,7 +7,7 @@ import pytest
 
 from review_boundary.cases import build_cases, suite_digest
 from review_boundary.cli import main
-from review_boundary.compare import compare_reports
+from review_boundary.compare import compare_reports, format_comparison
 from review_boundary.report import write_report
 from review_boundary.world import World, score_world
 
@@ -78,6 +78,27 @@ def test_all_real_case_variants_produce_comparison_compatible_metrics():
     result = compare_reports(payload, deepcopy(payload))
     assert result["exit_code"] == 0
     assert result["summary"]["unchanged_passing_samples"] == len(payload["rows"])
+
+
+def test_legacy_cli_keeps_original_comparison_and_console_output(report_files, tmp_path, capsys):
+    baseline, candidate = report_files
+    expected = compare_reports(json.loads(baseline.read_text()), json.loads(candidate.read_text()))
+    output = tmp_path / "comparison.json"
+    assert main(["compare", str(baseline), str(candidate), "--output", str(output)]) == 0
+    assert json.loads(output.read_text()) == expected
+    assert capsys.readouterr().out == format_comparison(expected) + "\n"
+
+
+def test_comparison_output_hardlink_cannot_overwrite_source(report_files, tmp_path, capsys):
+    import os
+
+    baseline, candidate = report_files
+    before = baseline.read_bytes()
+    output = tmp_path / "comparison.json"
+    os.link(baseline, output)
+    assert main(["compare", str(baseline), str(candidate), "--output", str(output)]) == 2
+    assert "must not overwrite" in capsys.readouterr().err
+    assert baseline.read_bytes() == before
 
 
 @pytest.mark.parametrize("state,expected_exit", [("pass", 0), ("regression", 1)])

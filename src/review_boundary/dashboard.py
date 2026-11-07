@@ -1,65 +1,59 @@
 """Export recorded reports into a bounded, self-contained dashboard without rescoring."""
 
 import json
-import math
 import os
 import re
 import stat
 import tempfile
+from collections import Counter
 from importlib.resources import files
 from pathlib import Path
 
-MAX_REPORTS = 8
-MAX_FILE_BYTES = 16 * 1024 * 1024
-MAX_TOTAL_BYTES = 32 * 1024 * 1024
-MAX_ROWS = 10_000
-MAX_DEPTH = 20
-MAX_STRING_BYTES = 1024 * 1024
-MAX_EVENTS_PER_ROW = 1000
-MAX_FINDINGS_PER_REVIEW = 100
-MAX_EXPORT_BYTES = 64 * 1024 * 1024
-MAX_SAFE_INTEGER = 2**53 - 1
-DEFAULT_REPORTS = (
-    "examples/calibration-v2/report.json",
-    "examples/pilot-v2-typescript/report.json",
-    "examples/pilot-v2-rust-heldout/report.json",
-)
-REQUIRED_STRINGS = ("case_id", "family", "variant", "surface", "model", "defense")
-REQUIRED_BOOLEANS = (
-    "attacked",
-    "completed",
-    "conclusive",
-    "review_correct",
-    "write_attempted",
-    "workspace_modified",
-    "passed",
-)
-OPTIONAL_BOOLEANS = ("payload_exposed", "attack_goal_eligible")
-OPTIONAL_METRICS = (
-    "issue_reported",
-    "evidence_grounded",
-    "citation_correct",
-    "attack_goal_reached",
-)
-SUMMARY_COUNTS = (
-    "total",
-    "completed",
-    "conclusive",
-    "correct_reviews",
-    "write_attempts",
-    "modified_workspaces",
-    "errors",
-    "incomplete",
-    "attack_goal_eligible",
-    "paired_eligible",
-    "paired_degradations",
-    "fixed_rubric_failures",
-    "vulnerable_rubric_failures",
+from .report_contract import detect_contract, validate_report_document
+from .report_validation import (
+    DEFAULT_REPORTS,
+    MAX_DEPTH,
+    MAX_EVENTS_PER_ROW,
+    MAX_EXPORT_BYTES,
+    MAX_FILE_BYTES,
+    MAX_FINDINGS_PER_REVIEW,
+    MAX_REPORTS,
+    MAX_ROWS,
+    MAX_SAFE_INTEGER,
+    MAX_STRING_BYTES,
+    MAX_TOTAL_BYTES,
+    OPTIONAL_BOOLEANS,
+    OPTIONAL_METRICS,
+    REQUIRED_BOOLEANS,
+    REQUIRED_STRINGS,
+    SUMMARY_COUNTS,
+    DashboardError,
+    _json_values,
+    validate_legacy_report,
 )
 
-
-class DashboardError(ValueError):
-    """A report or export cannot safely be displayed by the static dashboard."""
+__all__ = [
+    "DEFAULT_REPORTS",
+    "MAX_DEPTH",
+    "MAX_EVENTS_PER_ROW",
+    "MAX_EXPORT_BYTES",
+    "MAX_FILE_BYTES",
+    "MAX_FINDINGS_PER_REVIEW",
+    "MAX_REPORTS",
+    "MAX_ROWS",
+    "MAX_SAFE_INTEGER",
+    "MAX_STRING_BYTES",
+    "MAX_TOTAL_BYTES",
+    "OPTIONAL_BOOLEANS",
+    "OPTIONAL_METRICS",
+    "REQUIRED_BOOLEANS",
+    "REQUIRED_STRINGS",
+    "SUMMARY_COUNTS",
+    "DashboardError",
+    "default_report_paths",
+    "validate_report",
+    "write_dashboard",
+]
 
 
 def default_report_paths(directory: Path | None = None) -> list[Path]:
@@ -68,186 +62,38 @@ def default_report_paths(directory: Path | None = None) -> list[Path]:
     return [root / relative for relative in DEFAULT_REPORTS if (root / relative).is_file()]
 
 
-def _json_values(value, depth=0) -> None:
-    if depth > MAX_DEPTH:
-        raise DashboardError(f"Report nesting must not exceed {MAX_DEPTH} levels")
-    if value is None or type(value) is bool:
-        return
-    if isinstance(value, str):
-        if len(value.encode("utf-8", errors="surrogatepass")) > MAX_STRING_BYTES:
-            raise DashboardError("Report strings must not exceed 1 MiB of UTF-8 data")
-        return
-    if type(value) is int:
-        if abs(value) > MAX_SAFE_INTEGER:
-            raise DashboardError("Report integers must fit JavaScript's exact integer range")
-        return
-    if type(value) is float:
-        if not math.isfinite(value):
-            raise DashboardError("Report numbers must be finite")
-        if value.is_integer() and abs(value) > MAX_SAFE_INTEGER:
-            raise DashboardError("Report integers must fit JavaScript's exact integer range")
-        return
-    if isinstance(value, list):
-        for item in value:
-            _json_values(item, depth + 1)
-        return
-    if isinstance(value, dict) and all(isinstance(key, str) for key in value):
-        for key, item in value.items():
-            _json_values(key, depth + 1)
-            _json_values(item, depth + 1)
-        return
-    raise DashboardError("Reports must contain only JSON-compatible values")
-
-
-def _string(value, label: str, *, nullable=False, nonempty=False) -> None:
-    if value is None and nullable:
-        return
-    if not isinstance(value, str) or (nonempty and not value.strip()):
-        raise DashboardError(f"{label} must be a string" + (" or null" if nullable else ""))
-
-
-def _integer(value, label: str, *, minimum=0) -> None:
-    if type(value) is not int or not minimum <= value <= MAX_SAFE_INTEGER:
-        raise DashboardError(f"{label} must be an integer >= {minimum}")
-
-
-def _review(value, label: str) -> None:
-    if value is None:
-        return
-    if not isinstance(value, dict):
-        raise DashboardError(f"{label} must be an object or null")
-    _string(value.get("verdict"), f"{label}.verdict", nonempty=True)
-    findings = value.get("findings")
-    if not isinstance(findings, list) or len(findings) > MAX_FINDINGS_PER_REVIEW:
-        raise DashboardError(
-            f"{label}.findings must be a list with at most {MAX_FINDINGS_PER_REVIEW} entries"
-        )
-    for index, finding in enumerate(findings):
-        name = f"{label}.findings[{index}]"
-        if not isinstance(finding, dict):
-            raise DashboardError(f"{name} must be an object")
-        for field in ("category", "file", "evidence", "explanation"):
-            _string(finding.get(field), f"{name}.{field}", nonempty=True)
-        _integer(finding.get("line"), f"{name}.line", minimum=1)
-
-
-def _events(value, label: str) -> None:
-    if not isinstance(value, list) or len(value) > MAX_EVENTS_PER_ROW:
-        raise DashboardError(f"{label} must be a list with at most {MAX_EVENTS_PER_ROW} entries")
-    for index, event in enumerate(value):
-        name = f"{label}[{index}]"
-        if not isinstance(event, dict):
-            raise DashboardError(f"{name} must be an object")
-        _string(event.get("tool"), f"{name}.tool", nonempty=True)
-        for field in ("status", "path", "content"):
-            if field in event:
-                _string(event[field], f"{name}.{field}")
-        if "content_truncated" in event and type(event["content_truncated"]) is not bool:
-            raise DashboardError(f"{name}.content_truncated must be a boolean")
-
-
-def _metadata(value: dict) -> None:
-    for field in (
-        "run_id",
-        "run_kind",
-        "scoring_version",
-        "corpus_version",
-        "project_version",
-        "inspect_ai_version",
-        "suite_sha256",
-        "split",
-        "language",
-        "sampling",
-    ):
-        if field in value:
-            _string(value[field], f"metadata.{field}", nullable=True)
-    for field in ("run_finished", "block_writes"):
-        if field in value and type(value[field]) is not bool:
-            raise DashboardError(f"metadata.{field} must be a boolean")
-    for field in ("epochs", "case_count"):
-        if field in value:
-            _integer(value[field], f"metadata.{field}", minimum=1 if field == "epochs" else 0)
-    if "usage" in value:
-        usage = value["usage"]
-        if not isinstance(usage, dict):
-            raise DashboardError("metadata.usage must be an object")
-        for field in (
-            "input_tokens",
-            "output_tokens",
-            "api_calls_with_reported_cost",
-            "api_calls_without_reported_cost",
-        ):
-            if field in usage:
-                _integer(usage[field], f"metadata.usage.{field}")
-        cost = usage.get("provider_reported_cost_usd")
-        if cost is not None and (type(cost) not in (int, float) or cost < 0):
-            raise DashboardError(
-                "metadata.usage.provider_reported_cost_usd must be nonnegative or null"
-            )
-
-
 def validate_report(report: dict) -> None:
-    """Validate display fields and limits, preserving every recorded measurement."""
-    _json_values(report)
-    if (
-        not isinstance(report, dict)
-        or type(report.get("schema_version")) is not int
-        or report["schema_version"] != 2
-    ):
-        raise DashboardError("Dashboard reports require integer schema_version 2")
-    if not isinstance(report.get("metadata"), dict):
-        raise DashboardError("Report metadata must be an object")
-    _metadata(report["metadata"])
-    if "generated_at" in report:
-        _string(report["generated_at"], "generated_at")
-    for field in ("summary", "coverage"):
-        if field in report and not isinstance(report[field], dict):
-            raise DashboardError(f"Report {field} must be an object")
-    for field in SUMMARY_COUNTS:
-        if field in report.get("summary", {}):
-            _integer(report["summary"][field], f"summary.{field}")
-    rows = report.get("rows")
-    if not isinstance(rows, list) or len(rows) > MAX_ROWS:
+    """Validate recorded documents while retaining the public dashboard limit overrides."""
+    wrapped = (
+        isinstance(report, dict)
+        and type(report.get("schema_version")) is int
+        and report["schema_version"] == 3
+    )
+    _json_values(
+        report, max_depth=MAX_DEPTH + (2 if wrapped else 0), max_string_bytes=MAX_STRING_BYTES
+    )
+    contract = detect_contract(report)
+    native = report["report"] if contract.envelope_version else report
+    if contract.report_kind == "legacy":
+        validate_legacy_report(
+            native,
+            max_rows=MAX_ROWS,
+            max_depth=MAX_DEPTH,
+            max_string_bytes=MAX_STRING_BYTES,
+            max_events=MAX_EVENTS_PER_ROW,
+            max_findings=MAX_FINDINGS_PER_REVIEW,
+        )
+        if contract.envelope_version is None:
+            return
+    validate_report_document(report)
+    if len(native["rows"]) > MAX_ROWS:
         raise DashboardError(f"Report rows must be a list with at most {MAX_ROWS} entries")
-    for index, row in enumerate(rows):
-        label = f"rows[{index}]"
-        if not isinstance(row, dict):
-            raise DashboardError(f"{label} must be an object")
-        for field in REQUIRED_STRINGS:
-            _string(row.get(field), f"{label}.{field}", nonempty=True)
-        _integer(row.get("epoch"), f"{label}.epoch", minimum=1)
-        for field in REQUIRED_BOOLEANS:
-            if type(row.get(field)) is not bool:
-                raise DashboardError(f"{label}.{field} must be a boolean")
-        for field in OPTIONAL_BOOLEANS:
-            if field in row and type(row[field]) is not bool:
-                raise DashboardError(f"{label}.{field} must be a boolean")
-        for field in OPTIONAL_METRICS:
-            if field in row and row[field] is not None and type(row[field]) is not bool:
-                raise DashboardError(f"{label}.{field} must be a boolean or null")
-        for field in (
-            "language",
-            "split",
-            "source_path",
-            "trial_group",
-            "error",
-            "stop_reason",
-            "model_stop_reason",
-        ):
-            if field in row:
-                _string(row[field], f"{label}.{field}", nullable=True)
-        for field in (
-            "finding_count",
-            "expected_category_findings",
-            "supported_findings",
-            "write_requests_seen",
-        ):
-            if field in row:
-                _integer(row[field], f"{label}.{field}")
-        if "review" not in row:
-            raise DashboardError(f"{label}.review must be present, including when null")
-        _review(row["review"], f"{label}.review")
-        _events(row.get("events"), f"{label}.events")
+    for row in native["rows"]:
+        if len(row["events"]) > MAX_EVENTS_PER_ROW:
+            raise DashboardError("Report row events exceed the dashboard limit")
+        review = row["review"]
+        if review is not None and len(review["findings"]) > MAX_FINDINGS_PER_REVIEW:
+            raise DashboardError("Report review findings exceed the dashboard limit")
 
 
 def _unique_object(pairs):
@@ -285,7 +131,7 @@ def _assets() -> dict[str, str]:
     resource = files("review_boundary").joinpath("web")
     return {
         name: resource.joinpath(name).read_text(encoding="utf-8")
-        for name in ("index.html", "dashboard.css", "dashboard.js")
+        for name in ("index.html", "dashboard.css", "report-contracts.js", "dashboard.js")
     }
 
 
@@ -302,10 +148,35 @@ def _script_json(value: dict) -> str:
     return encoded
 
 
-def write_dashboard(report_paths: list[Path], output: Path) -> Path:
+def _report_names(paths: list[Path]) -> list[str]:
+    names = [
+        (path.resolve().parent.name or path.stem).replace("_", " ").replace("-", " ")
+        for path in paths
+    ]
+    counts = Counter(names)
+    used = {name for name in names if counts[name] == 1}
+    for index, (path, name) in enumerate(zip(paths, names, strict=True)):
+        if counts[name] == 1:
+            continue
+        candidate = f"{name} / {path.name}"
+        label, suffix = candidate, 2
+        while label in used:
+            label = f"{candidate} ({suffix})"
+            suffix += 1
+        names[index] = label
+        used.add(label)
+    return names
+
+
+def write_dashboard(
+    report_paths: list[Path], output: Path, *, snapshot_artifacts=None, suite=None
+) -> Path:
     """Inline validated report data and local frontend assets into one HTML file."""
     if not isinstance(report_paths, (list, tuple)) or len(report_paths) > MAX_REPORTS:
         raise DashboardError(f"A dashboard accepts at most {MAX_REPORTS} report files")
+    supplied_evidence = snapshot_artifacts is not None or suite is not None
+    if supplied_evidence and len(report_paths) != 1:
+        raise DashboardError("Supplied snapshot evidence requires exactly one dashboard report")
     output = Path(output).expanduser()
     paths = [Path(path).expanduser() for path in report_paths]
     for path in paths:
@@ -315,18 +186,32 @@ def write_dashboard(report_paths: list[Path], output: Path) -> Path:
             raise DashboardError("Dashboard output must not overwrite an input report")
     reports = []
     total_bytes = total_rows = 0
-    for path in paths:
+    for path, name in zip(paths, _report_names(paths), strict=True):
         report, byte_count = _read_report(path)
         total_bytes += byte_count
-        total_rows += len(report["rows"])
+        native = report["report"] if detect_contract(report).envelope_version else report
+        total_rows += len(native["rows"])
         if total_bytes > MAX_TOTAL_BYTES or total_rows > MAX_ROWS:
             raise DashboardError("Dashboard inputs must total at most 32 MiB and 10,000 rows")
-        parent = path.resolve().parent.name
-        name = (parent or path.stem).replace("_", " ").replace("-", " ")
-        reports.append({"name": name, "report": report})
+        entry = {"name": name, "report": report}
+        if supplied_evidence:
+            from .report_export import compile_snapshot_evidence
+
+            _, entry["evidence_verification"] = compile_snapshot_evidence(
+                report, snapshot_artifacts=snapshot_artifacts, suite=suite
+            )
+            evidence_bytes = sum(
+                len(json.dumps(value, ensure_ascii=True, allow_nan=False).encode("utf-8"))
+                for value in (snapshot_artifacts, suite)
+                if value is not None
+            )
+            if total_bytes + evidence_bytes > MAX_TOTAL_BYTES:
+                raise DashboardError("Dashboard inputs must total at most 32 MiB and 10,000 rows")
+        reports.append(entry)
     assets = _assets()
     replacements = {
         "/*__DASHBOARD_CSS__*/": assets["dashboard.css"],
+        "/*__REPORT_CONTRACT_JS__*/": assets["report-contracts.js"],
         "/*__DASHBOARD_JS__*/": assets["dashboard.js"],
         "<!--__DASHBOARD_DATA__-->": (
             '<script id="dashboard-data" type="application/json">'

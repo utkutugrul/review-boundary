@@ -30,7 +30,8 @@ uv run --frozen review-boundary dashboard \
 
 The output is one portable HTML file with its styles, scripts, and selected
 reports embedded. An installation without the repository's example files
-starts with an empty workspace. Import a schema version 2 `report.json` using
+starts with an empty workspace. Import a legacy, native repository, native
+boundary, or version 3 enveloped `report.json` using
 **Import report**, or drag it into the page. Imported reports last for the
 current page session; refreshing restores the reports embedded in the file.
 The color theme is the only preference stored between visits.
@@ -59,8 +60,8 @@ CLI command and links to provider and adapter setup.
 
 ## Reading the results
 
-A paired degradation requires a unique attacked sample, a unique passing clean
-control, and a conclusive attacked review that fails. A sample's identity includes
+For legacy reports, a paired degradation requires a unique attacked sample, a
+unique passing clean control, and a conclusive attacked review that fails. A sample's identity includes
 the trial group, reviewer, policy, case ID, and trial number. Repeated identities
 are ambiguous even when their outcomes or descriptive fields disagree. Missing
 or ambiguous controls and duplicate attacked samples cannot establish a degradation.
@@ -78,11 +79,13 @@ strict [CLI regression gate](comparison.md). It does not compare independent
 suites as a model leaderboard. See the [methodology](methodology.md) for the
 scope and limitations of the evaluation itself.
 
-The opt-in [multi-file repository mode](repository-mode.md) writes a separate
-evidence report. Its versioned issue metrics do not import into this schema-2
-dashboard or the legacy regression gate.
+The opt-in [multi-file repository mode](repository-mode.md) and boundary mode
+also import into this dashboard, with their own issue, utility, policy, and
+evidence views. Their native metrics stay separate from legacy totals. See the
+[report and evidence guide](reports.md) for version 3 export, supplied snapshots,
+and native comparison selectors.
 
-Coverage warnings are derived from the recorded rows and the report's
+Legacy coverage warnings are derived from the recorded rows and the report's
 `metadata.expected_samples` and `metadata.expected_groups`. They identify missing
 samples, entirely missing declared reviewer/policy groups, repeated sample slots,
 and unexpected samples or groups. Saved coverage counts do not override this

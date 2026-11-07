@@ -1,6 +1,7 @@
 /* ReviewBoundary's portable, browser-local evaluation workspace. */
 (() => {
   "use strict";
+  const Contracts = typeof module !== "undefined" && module.exports ? require("./report-contracts.js") : globalThis.ReviewBoundaryReportContracts;
   const MAX_REPORTS = 8;
   const MAX_BYTES = 16 * 1024 * 1024;
   const MAX_TOTAL_BYTES = 32 * 1024 * 1024;
@@ -9,11 +10,21 @@
   const PAGES = { overview: "Overview", runs: "Evaluation runs", cases: "Case explorer", pairs: "Paired reviews" };
   const TITLES = { "calibration-v2": "Full-suite calibration", "pilot-v2-typescript": "TypeScript pilot", "pilot-v2-rust-heldout": "Rust held-out pilot" };
   const FAMILIES = { document_path: "Document path access", signed_webhook: "Webhook signature", tenant_lookup: "Tenant isolation", shell_preview: "Shell command preview", ts_batch_export: "Batch export permissions", rust_partial_batch_permissions: "Partial batch permissions" };
-  const h = value => String(value ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
-  const titleCase = value => String(value ?? "").replace(/^(ts_|rust_)/, "").replaceAll("_", " ").replace(/^./, c => c.toUpperCase());
-  const familyName = value => FAMILIES[value] || titleCase(value);
-  const surfaceName = value => SURFACES[value] || titleCase(value);
-  const modelName = value => String(value).replace(/^mockllm\/calibration-/, "Scripted ").replace(/^openrouter\//, "");
+  const stringValue = value => typeof value === "string" ? value : "";
+  const displayText = value => typeof value === "string" || typeof value === "boolean" || (typeof value === "number" && Number.isFinite(value)) ? String(value) : "";
+  const h = value => displayText(value).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+  const titleCase = value => stringValue(value).replace(/^(ts_|rust_)/, "").replaceAll("_", " ").replace(/^./, c => c.toUpperCase());
+  const familyName = value => typeof value === "string" && Object.hasOwn(FAMILIES, value) ? FAMILIES[value] : titleCase(value);
+  const surfaceName = value => typeof value === "string" && Object.hasOwn(SURFACES, value) ? SURFACES[value] : titleCase(value);
+  const modelName = value => stringValue(value).replace(/^mockllm\/calibration-/, "Scripted ").replace(/^openrouter\//, "");
+  const runName = entry => {
+    const name = stringValue(entry?.name), key = name.toLowerCase().replaceAll(" ", "-");
+    return Object.hasOwn(TITLES, key) ? TITLES[key] : titleCase(name.replace(/\.json$/i, "").replaceAll("-", " ")) || "Imported evaluation";
+  };
+  function formatDate(report) {
+    const date = new Date(stringValue(report.generated_at));
+    return Number.isNaN(date.valueOf()) ? "Date not recorded" : date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+  }
   const outcome = row => !row.conclusive ? "inconclusive" : row.passed ? "pass" : "fail";
   const pct = (num, den) => den ? `${Math.round(num / den * 100)}%` : "N/A";
   const ratio = (num, den) => den ? `${num}/${den}` : "N/A";
@@ -171,63 +182,381 @@
     fields.push(["Recorded score consistency", status]);
     return fields;
   }
-  function validateReport(report) {
-    const object = x => x !== null && typeof x === "object" && !Array.isArray(x);
-    const fail = message => { throw new Error(message); };
-    if (!object(report) || report.schema_version !== 2 || !object(report.metadata) || !Array.isArray(report.rows)) fail("Choose a ReviewBoundary report.json with schema version 2.");
-    if (report.rows.length > MAX_ROWS) fail("A workspace supports up to 10,000 recorded samples.");
-    let nodes = 0;
-    function walk(value, depth = 0) {
-      if (++nodes > 1000000 || depth > 20) fail("The report exceeds the supported structure limits.");
-      if (typeof value === "number" && (!Number.isFinite(value) || (Number.isInteger(value) && !Number.isSafeInteger(value)))) fail("The report contains a number outside the supported range.");
-      if (typeof value === "string" && new TextEncoder().encode(value).length > 1048576) fail("A report field is too large.");
-      if (value && typeof value === "object") {
-        if (!Array.isArray(value)) for (const key of Object.keys(value)) walk(key, depth + 1);
-        for (const v of Object.values(value)) walk(v, depth + 1);
+  function validateReport(report) { return Contracts.validateLegacyReport(report); }
+
+  // Native report views. Everything below builds DOM nodes with textContent only.
+  const NATIVE_PAGE_SIZE = 20;
+  const NATIVE_STATUS = { not_recorded: "Not recorded", unavailable: "Unavailable", unsupported_version: "Unsupported version", unsupported_policy: "Unsupported policy", mismatch: "Mismatch", matching_supplied_artifact: "Matches supplied artifact" };
+  const NATIVE_REASON_TEXT = {
+    no_snapshot_reference: "No snapshot reference is recorded for this row.",
+    verification_context_not_supplied: "The snapshot was not supplied for checking.",
+    verification_context_invalid: "The supplied evidence check could not be used.",
+    verification_context_source_mismatch: "The supplied check belongs to a different report.",
+    verification_record_not_supplied: "No evidence check was supplied for this row.",
+    verification_record_inconsistent: "The check and snapshot reference disagree.",
+    verification_record_incomplete: "The supplied check is incomplete.",
+    document_consistency_only: "The supplied artifact agrees with the recorded digest.",
+    reference_kind_disagrees_with_report: "The recorded reference is for a different kind of report.",
+    reference_source_hash_disagrees_with_envelope: "The recorded reference names a different source report.",
+    reference_case_hash_disagrees_with_row: "The recorded reference names a different case than this row.",
+    reference_row_not_recorded: "The recorded reference points to a row that is not in this report.",
+    failed_execution_has_no_usable_snapshot_binding: "This failed run has no usable snapshot.",
+    external_policy_has_no_snapshot_restore_contract: "Snapshots for this external policy are not supported.",
+    unsupported_snapshot_version: "The recorded snapshot version is not supported.",
+  };
+  const NATIVE_STATUS_TEXT = {
+    not_recorded: "No snapshot reference is recorded for this row.",
+    unavailable: "The snapshot state could not be checked for this row.",
+    unsupported_version: "The recorded snapshot version is not supported.",
+    unsupported_policy: "The recorded run policy has no snapshot support.",
+    mismatch: "The recorded snapshot reference disagrees with the report.",
+    matching_supplied_artifact: "The supplied artifact agrees with the recorded digest.",
+  };
+  const nativeText = (value, max = 400) => { const text = displayText(value); return text.length > max ? `${text.slice(0, max)}...` : text; };
+  const nativeCount = value => Number.isSafeInteger(value) ? number(value) : "Unknown";
+  const isNative = entry => Boolean(entry && entry.contract && entry.contract.report_kind !== "legacy");
+  function makeEntry(name, source, verification = null) {
+    if (verification !== null && (typeof verification !== "object" || Array.isArray(verification))) throw new Error("The evidence verification context is invalid.");
+    const contract = Contracts.validateDisplayDocument(source), report = contract.envelope_version ? source.report : source;
+    if (contract.report_kind === "legacy") validateReport(report);
+    return { name: stringValue(name) || "Saved evaluation", document: source, contract, report, evidence_verification: verification };
+  }
+  function makeImportedEntry(name, bytes) {
+    let text;
+    try { text = new TextDecoder("utf-8", { fatal: true }).decode(bytes); }
+    catch { throw new Error("The selected file is not valid UTF-8 text."); }
+    return makeEntry(name, Contracts.parseReportText(text), null);
+  }
+  function nativeSnapshots(source, verification) {
+    let result;
+    try { result = Contracts.snapshotStates(source, verification ?? null); } catch { return null; }
+    return Array.isArray(result) ? result : Array.isArray(result?.rows) ? result.rows : Array.isArray(result?.results) ? result.results : null;
+  }
+  function renderNativeView(source, options = {}) {
+    return renderNativeDisplayView(Contracts.createDisplayView(source, options.verification ?? null), options);
+  }
+  function renderNativeDisplayView(display, options) {
+    const doc = options.document || globalThis.document;
+    const root = options.root || doc.querySelector("#main");
+    const view = options.view || (options.view = {});
+    for (const [key, value] of Object.entries({ search: "", reviewer: "all", guard: "all", pageNum: 0, pairPage: 0, selected: null })) if (!Object.hasOwn(view, key)) view[key] = value;
+    const kind = display.contract.report_kind;
+    if (kind !== "repository" && kind !== "boundary") throw new Error("The native view needs a repository or boundary report.");
+    const native = display.report, boundary = kind === "boundary";
+    const rows = native.rows, meta = native.metadata && typeof native.metadata === "object" ? native.metadata : {};
+    const runRecord = Object.fromEntries(["run_id", "run_kind", "run_finished", "scoring_version", "corpus_version", "project_version", "inspect_ai_version", "epochs", "case_count", "expected_count", "suite_sha256", "observation_scope", "os_sandboxed", "fixture_note"].filter(key => Object.hasOwn(meta, key)).map(key => [key, meta[key]]));
+    const stats = Contracts.nativeStats(native), cov = Contracts.nativeCoverage(native), snaps = display.snapshots;
+    const page = ["cases", "pairs"].includes(options.page) ? options.page : "overview";
+    const el = (tag, cls, ...kids) => {
+      const node = doc.createElement(tag);
+      if (cls) node.className = cls;
+      node.append(...kids.filter(kid => kid !== null && kid !== undefined && kid !== false).map(kid => typeof kid === "object" ? kid : String(kid)));
+      return node;
+    };
+    const locate = (index, selector) => { try { return display.evidenceLocator(index, selector); } catch { return null; } };
+    const rerender = () => renderNativeDisplayView(display, options);
+    const eventNodes = new Map();
+    const go = target => { if (typeof options.navigate === "function") options.navigate(target); else { options.page = target; rerender(); } };
+    const tag = (text, cls = "") => el("span", cls ? `tag ${cls}` : "tag", text);
+    const button = (cls, text, onClick, label) => { const node = el("button", cls, text); node.type = "button"; node.addEventListener("click", onClick); if (label) node.setAttribute("aria-label", label); return node; };
+    const flag = (value, yes = "Yes", no = "No", invert = false) => typeof value === "boolean" ? el("span", `signal ${value !== invert ? "good" : "bad"}`, value ? yes : no) : el("span", "signal unknown", "Unknown");
+    const count = (value, risky = false) => Number.isSafeInteger(value) ? el("span", risky && value ? "signal bad" : "signal", value) : el("span", "signal unknown", "Unknown");
+    const yesNo = value => value === true ? "yes" : value === false ? "no" : "Unknown";
+    const line = (label, value) => el("div", "metric-line", el("span", "", label), value);
+    const metric = (label, value, suffix, note, color = "") => el("div", "metric", el("div", "metric-label", label), el("div", color ? `metric-value ${color}` : "metric-value", value, el("small", "", suffix)), el("div", "metric-note", note));
+    const section = (title, ...kids) => el("div", "native-section", el("span", "tiny-label", title), ...kids);
+    const triTag = (value, yes, no, unknown = "UNKNOWN") => value === true ? tag(yes, "tag-green") : value === false ? tag(no, "tag-red") : tag(unknown, "tag-amber");
+    const completionTag = row => !row.completed ? tag("INCOMPLETE", "tag-amber") : row.conclusive === false ? tag("INCONCLUSIVE", "tag-amber") : tag("COMPLETED", "tag-green");
+    const clampPage = (key, total) => { view[key] = Math.max(0, Math.min(view[key], Math.ceil(total / NATIVE_PAGE_SIZE) - 1)); return view[key]; };
+    const facts = object => {
+      const dl = el("dl", "native-dl");
+      let shown = 0;
+      for (const [key, value] of Object.entries(object && typeof object === "object" && !Array.isArray(object) ? object : {})) {
+        if (shown >= 16 || !/^[a-z0-9_]{1,48}$/i.test(key) || !["string", "number", "boolean"].includes(typeof value)) continue;
+        dl.append(el("dt", "", titleCase(key)), el("dd", "", nativeText(value, 300)));
+        shown++;
       }
-    }
-    walk(report);
-    const integer = value => Number.isSafeInteger(value) && value >= 0;
-    for (const key of ["run_id", "run_kind", "scoring_version", "corpus_version", "project_version", "inspect_ai_version", "suite_sha256", "split", "language", "sampling"]) if (report.metadata[key] != null && typeof report.metadata[key] !== "string") fail("The report contains an invalid metadata field.");
-    for (const key of ["run_finished", "block_writes"]) if (Object.hasOwn(report.metadata, key) && typeof report.metadata[key] !== "boolean") fail("The report contains an invalid metadata flag.");
-    for (const key of ["epochs", "case_count"]) if (Object.hasOwn(report.metadata, key) && (!integer(report.metadata[key]) || (key === "epochs" && report.metadata[key] < 1))) fail("The report contains an invalid sample count.");
-    if (Object.hasOwn(report, "generated_at") && typeof report.generated_at !== "string") fail("The report date must be text.");
-    for (const key of ["summary", "coverage"]) if (Object.hasOwn(report, key) && !object(report[key])) fail("The report summary and coverage must be objects.");
-    for (const key of ["total", "completed", "conclusive", "correct_reviews", "write_attempts", "modified_workspaces", "errors", "incomplete", "attack_goal_eligible", "paired_eligible", "paired_degradations", "fixed_rubric_failures", "vulnerable_rubric_failures"]) if (Object.hasOwn(report.summary || {}, key) && !integer(report.summary[key])) fail("The report contains an invalid summary count.");
-    if (Object.hasOwn(report.metadata, "usage")) {
-      const usage = report.metadata.usage;
-      if (!object(usage)) fail("The recorded usage must be an object.");
-      for (const key of ["input_tokens", "output_tokens", "api_calls_with_reported_cost", "api_calls_without_reported_cost"]) if (Object.hasOwn(usage, key) && !integer(usage[key])) fail("The recorded usage contains an invalid count.");
-      if (usage.provider_reported_cost_usd != null && (typeof usage.provider_reported_cost_usd !== "number" || usage.provider_reported_cost_usd < 0)) fail("The recorded cost must be nonnegative or unknown.");
-    }
-    for (const row of report.rows) {
-      if (!object(row)) fail("A sample is not a valid object.");
-      for (const key of ["case_id", "family", "variant", "surface", "model", "defense"]) if (typeof row[key] !== "string" || !row[key].trim()) fail("A sample is missing its identity fields.");
-      for (const key of ["attacked", "completed", "conclusive", "review_correct", "write_attempted", "workspace_modified", "passed"]) if (typeof row[key] !== "boolean") fail("A sample is missing its recorded outcome fields.");
-      if (!Number.isInteger(row.epoch) || row.epoch < 1) fail("A sample has an invalid trial number.");
-      for (const key of ["issue_reported", "evidence_grounded", "citation_correct", "attack_goal_reached"]) if (row[key] != null && typeof row[key] !== "boolean") fail("A sample contains an invalid metric.");
-      for (const key of ["attack_goal_eligible", "payload_exposed"]) if (Object.hasOwn(row, key) && typeof row[key] !== "boolean") fail("A sample contains an invalid flag.");
-      for (const key of ["finding_count", "expected_category_findings", "supported_findings", "write_requests_seen"]) if (Object.hasOwn(row, key) && !integer(row[key])) fail("A sample contains an invalid count.");
-      for (const key of ["trial_group", "language", "split", "source_path", "error", "stop_reason", "model_stop_reason"]) if (row[key] != null && typeof row[key] !== "string") fail("A sample contains an invalid text field.");
-      if (!Array.isArray(row.events) || row.events.length > 1000) fail("A sample has an invalid tool trace.");
-      for (const event of row.events) {
-        if (!object(event) || typeof event.tool !== "string" || !event.tool.trim()) fail("A sample has an invalid tool event.");
-        for (const key of ["status", "path", "content"]) if (Object.hasOwn(event, key) && typeof event[key] !== "string") fail("A tool event contains an invalid text field.");
-        if (Object.hasOwn(event, "content_truncated") && typeof event.content_truncated !== "boolean") fail("A tool event contains an invalid truncation flag.");
+      return shown ? dl : null;
+    };
+    const pager = (total, current, onStep) => {
+      const last = Math.max(0, Math.ceil(total / NATIVE_PAGE_SIZE) - 1);
+      const prev = button("button button-small", "Previous", () => onStep(-1)), next = button("button button-small", "Next", () => onStep(1));
+      prev.disabled = current <= 0; next.disabled = current >= last;
+      return el("div", "pagination", el("span", "", total ? `Showing ${current * NATIVE_PAGE_SIZE + 1}-${Math.min((current + 1) * NATIVE_PAGE_SIZE, total)} of ${total}` : "Nothing to show"), el("div", "", prev, next));
+    };
+    const runSwitch = () => {
+      if (!Array.isArray(options.runs) || !options.runs.length) return null;
+      const select = el("select", "");
+      select.setAttribute("data-control", "run"); select.setAttribute("aria-label", "Recorded evaluation");
+      options.runs.forEach((name, i) => { const choice = el("option", "", stringValue(name) || "Saved evaluation"); choice.value = String(i); choice.selected = i === options.run; select.append(choice); });
+      return el("label", "run-switch", el("span", "tiny-label", "RECORDED EVALUATION"), select);
+    };
+    const header = (eyebrow, title, text) => el("div", "page-header", el("div", "", el("p", "eyebrow", eyebrow), el("h1", "", title), el("p", "page-description", text)), runSwitch());
+    const banner = () => {
+      const run = meta.run_kind;
+      const label = run === "calibration" ? "Calibration run" : run === "model" ? "Native model run" : run === "adapter" ? "External reviewer run" : "Run kind not recorded";
+      const note = run === "calibration" ? "Scripted reviewers check the harness, not model performance." : run === "model" ? "Recorded model responses on this suite. This is not a safety certification." : run === "adapter" ? "Only actions visible through the reviewer protocol are recorded." : "The run kind is missing or unrecognized, so no claim is made about who produced these reviews.";
+      return el("div", "context-strip", el("span", ""), el("p", "", el("strong", "", `${label}. `), `${note} Each result below is counted separately. No combined safety score is computed.`), tag(boundary ? "BOUNDARY" : "REPOSITORY"));
+    };
+    const exportRow = () => { const exporter = el("button", "button", "Export original report"); exporter.type = "button"; exporter.setAttribute("data-export", "true"); return el("div", "native-actions", exporter); };
+    const lineText = lines => {
+      if (lines.length <= 10) return lines.join(", ");
+      const runs = [];
+      for (const value of lines) { const last = runs[runs.length - 1]; if (last && value === last[1] + 1) last[1] = value; else runs.push([value, value]); }
+      return runs.map(([from, to]) => from === to ? String(from) : `${from}-${to}`).join(", ");
+    };
+    // Pending focus is bound to this document, row and event. The route is never touched.
+    const revealEvent = (rowIndex, eventIndex) => {
+      view.pendingEvidence = { row_index: rowIndex, event_index: eventIndex };
+      view.selected = rowIndex;
+      view.inlineRow = page === "pairs" && !boundary ? rowIndex : null;
+      rerender();
+    };
+    const citationLinks = (index, finding) => {
+      try { return display.citationEventLinks(index, finding.finding_sha256); } catch { return null; }
+    };
+    const citationButtons = (record, index) => {
+      if (!record || !Array.isArray(record.event_links)) return null;
+      if (!record.event_links.length) return el("span", "row-meta", "No recorded read or search event returned these lines.");
+      return el("div", "citation-links", el("span", "tiny-label", "RECORDED SOURCE EVIDENCE"),
+        el("div", "native-actions", ...record.event_links.map(link => {
+          const kind = link.tool === "search_files" ? "search" : "read";
+          return button("text-button", `Recorded ${kind} event [${link.event_index}] · lines ${lineText(link.observed_lines)}${link.covers_citation ? "" : " (partial)"}`, () => revealEvent(index, link.event_index), `Show recorded ${kind} event ${link.event_index} in the tool trace`);
+        })),
+        record.fully_observed ? null : el("span", "row-meta", `Cited lines not returned by recorded tools: ${lineText(record.missing_lines)}`));
+    };
+    const findingNode = (index, finding, position) => {
+      if (!finding || typeof finding !== "object" || !locate(index, { finding_sha256: finding.finding_sha256 })) return el("div", "no-findings", `Finding ${position + 1} could not be linked to this report and is not shown.`);
+      const body = finding.finding && typeof finding.finding === "object" ? finding.finding : {};
+      const links = citationLinks(index, finding);
+      const spans = (Array.isArray(body.evidence) ? body.evidence : []).map((item, i) => item && typeof item === "object" ? el("div", "", el("span", "row-meta", `${item.path}:${item.start_line}-${item.end_line}${typeof item.symbol === "string" && item.symbol ? ` · ${item.symbol}` : ""}`), el("pre", "finding-code", item.excerpt), citationButtons(links && links[i] && links[i].evidence_index === i ? links[i] : null, index)) : null);
+      const ids = Array.isArray(finding.matched_issue_ids) ? finding.matched_issue_ids.filter(id => typeof id === "string").map(id => nativeText(id, 80)).join(", ") : "";
+      return el("article", "finding", el("strong", "", titleCase(body.category)), el("span", "row-meta", `Finding hash (recorded, unchecked): ${nativeText(finding.finding_sha256, 80)}`), el("p", "", nativeText(body.summary, 2000)), ...spans,
+        el("div", "metric-list", line("Evidence observed in the tool trace", flag(finding.evidence_observed)), line("Grounded in recorded evidence", flag(finding.grounded)), line("Matched issue ids", el("span", "", ids || "None"))),
+        el("span", "tiny-label", "INDEPENDENT ADJUDICATION"), adjudicationNode(finding.adjudication));
+    };
+    const adjudicationNode = value => value && typeof value === "object" ? (facts(value) || el("p", "native-note", "A record is present but has no displayable fields.")) : el("p", "native-note", "None recorded. The semantic result stays Unknown.");
+    const eventList = (index, row) => {
+      const trace = new Map((Array.isArray(row.policy_trace) ? row.policy_trace : []).filter(entry => entry && Number.isSafeInteger(entry.sequence)).map(entry => [entry.sequence, entry]));
+      const list = el("ol", "tool-trace");
+      (Array.isArray(row.events) ? row.events : []).forEach((event, i) => {
+        if (!event || typeof event !== "object" || !locate(index, { event_index: i })) { list.append(el("li", "", el("span", "tool-number", `[${i}]`), el("span", "", "Event could not be linked to this report."), el("span", "tool-status", "unresolved"))); return; }
+        const sequence = event.policy_sequence, linked = Number.isSafeInteger(sequence) ? trace.get(sequence) : null;
+        const resolved = linked && locate(index, { event_index: i, policy_sequence: sequence });
+        const lines = Array.isArray(event.lines) && event.lines.length && event.lines.every(Number.isSafeInteger) ? ` lines ${event.lines.join(", ")}` : "";
+        const item = el("li", "", el("span", "tool-number", `[${i}]`), el("span", "", nativeText(event.tool, 80),
+          typeof event.path === "string" ? el("span", "tool-path", `${event.path}${lines}`) : null,
+          typeof event.review_sha256 === "string" ? el("span", "tool-path", `Review submission hash (recorded, unchecked): ${nativeText(event.review_sha256, 80)}`) : null,
+          Number.isSafeInteger(sequence) ? el("span", "tool-path", resolved ? `Policy sequence ${sequence}: ${nativeText(linked.decision, 40)}, ${nativeText(linked.result, 40)}` : `Policy sequence ${sequence} (unresolved)`) : null),
+          el("span", "tool-status", nativeText(event.status || "recorded", 40)));
+        item.setAttribute("data-row-index", index);
+        item.setAttribute("data-event-index", i);
+        eventNodes.set(`${index}:${i}`, item);
+        list.append(item);
+      });
+      return list;
+    };
+    const guardNodes = (index, row) => {
+      const effects = new Map();
+      for (const effect of Array.isArray(row.effects) ? row.effects : []) if (effect && typeof effect.effect_id === "string") { const seen = effects.get(effect.effect_id); if (seen) seen.count++; else effects.set(effect.effect_id, { effect, count: 1 }); }
+      const decisions = el("ol", "tool-trace");
+      for (const entry of Array.isArray(row.policy_trace) ? row.policy_trace : []) {
+        if (!entry || typeof entry !== "object") continue;
+        const sequence = entry.sequence, id = typeof entry.effect_id === "string" ? entry.effect_id : null;
+        const linked = Number.isSafeInteger(sequence) && locate(index, id ? { policy_sequence: sequence, effect_id: id } : { policy_sequence: sequence });
+        if (!linked) { decisions.append(el("li", "", el("span", "tool-number", "#?"), el("span", "", "Policy trace entry could not be linked to this report."), el("span", "tool-status", "unresolved"))); continue; }
+        decisions.append(el("li", "", el("span", "tool-number", `#${sequence}`), el("span", "", `${nativeText(entry.tool, 80)} · ${nativeText(entry.decision, 40)}`,
+          el("span", "tool-path", entry.target),
+          el("span", "tool-path", `Reason: ${nativeText(entry.reason, 400)}`),
+          el("span", "tool-path", `Expected authorized: ${yesNo(entry.expected_authorized)} · Arguments valid: ${yesNo(entry.arguments_valid)} · After submission: ${yesNo(entry.after_submission)}`),
+          el("span", "tool-path", id ? `Effect ${id}${effects.has(id) ? " (listed below)" : " (not listed)"}` : "No effect recorded"),
+          entry.decision === "allow" ? null : el("span", "tool-path", "Guard intervention. It is not counted as resistance by the reviewer.")),
+          el("span", "tool-status", nativeText(entry.result, 40))));
       }
-      if (!Object.hasOwn(row, "review")) fail("A sample must include a review, or an explicit null.");
-      if (row.review != null) {
-        if (!object(row.review) || typeof row.review.verdict !== "string" || !row.review.verdict.trim() || !Array.isArray(row.review.findings) || row.review.findings.length > 100) fail("A sample has an invalid review.");
-        for (const finding of row.review.findings) {
-          if (!object(finding) || !Number.isInteger(finding.line) || finding.line < 1) fail("A finding has an invalid source line.");
-          for (const key of ["category", "file", "evidence", "explanation"]) if (typeof finding[key] !== "string" || !finding[key].trim()) fail("A finding is missing its recorded evidence.");
+      const cards = [...effects.entries()].map(([id, { effect, count: times }]) => !locate(index, { effect_id: id }) ? el("div", "no-findings", "An effect could not be linked to this report and is not shown.") :
+        el("article", "finding", el("strong", "", nativeText(effect.tool, 80)), el("span", "row-meta", effect.target), el("span", "row-meta", `Effect id (recorded, unchecked): ${id}`),
+          el("div", "metric-list", line("Expected authorized", flag(effect.expected_authorized)), line("Content matches submitted review", flag(effect.content_matches_submitted_review))),
+          typeof effect.content === "string" ? el("pre", "finding-code", effect.content) : null,
+          times > 1 ? el("span", "row-meta", `Recorded ${times} times and shown once.`) : null));
+      return [section(`GUARD DECISIONS · ${decisions.children.length}`, decisions.children.length ? decisions : el("div", "no-findings", "No guard decisions recorded.")), section(`VIRTUAL EFFECTS · ${effects.size} UNIQUE`, ...(cards.length ? cards : [el("div", "no-findings", "No virtual effects recorded.")]))];
+    };
+    const snapshotNode = index => {
+      const item = snaps ? snaps[index] : null, status = item && Object.hasOwn(NATIVE_STATUS, item.status) ? item.status : null;
+      const reason = item && typeof item.reason === "string" && Object.hasOwn(NATIVE_REASON_TEXT, item.reason) ? NATIVE_REASON_TEXT[item.reason] : status ? NATIVE_STATUS_TEXT[status] : "Snapshot state could not be derived.";
+      const records = item ? [facts(item), facts(item.snapshot_reference)].filter(Boolean) : [];
+      return section("EVIDENCE SNAPSHOT", el("p", "", tag(status ? NATIVE_STATUS[status] : "Unavailable", status === "mismatch" ? "tag-red" : status === "matching_supplied_artifact" ? "" : "tag-amber"), " ", reason),
+        el("p", "native-note", "Consistency check only. Authenticity: not established. A match says the supplied artifact agrees with the recorded digest, not where either came from."),
+        records.length ? el("details", "native-snapshot-details", el("summary", "", "Snapshot details"), el("p", "native-note", "Recorded status, reason codes and digests, shown as recorded and unchecked."), ...records) : null);
+    };
+    const detailNode = (index, close) => {
+      const row = rows[index];
+      const lines = [line("Run completed", flag(row.completed)), line("Conclusive", flag(row.conclusive)), line("Structural rubric passed", flag(row.rubric_passed)), line("Adjudicated semantic result", flag(row.semantic_passed, "Pass", "Fail")), line("Findings without adjudication", count(row.unknown_findings)), line("Duplicate findings", count(row.duplicate_finding_count)), line("Target issues matched", count(row.target_issues_matched))];
+      if (boundary) lines.push(line("Task utility met", flag(row.task_success)), line("Unauthorized action attempts", count(row.unauthorized_action_attempts, true)), line("Unauthorized virtual effects", count(row.unauthorized_effects, true)), line("Guard blocks", count(row.policy_blocks)), line("Guard escalations", count(row.policy_escalations)), line("Resistance observable", flag(row.resistance_observable)), line("Agent resisted", flag(row.agent_resisted)));
+      if (row.review && typeof row.review.verdict === "string") lines.unshift(line("Recorded verdict", el("span", "", titleCase(row.review.verdict))));
+      const found = Array.isArray(row.findings) ? row.findings : [];
+      return el("section", "panel native-detail",
+        el("div", "pair-heading", el("div", "", el("h2", "", nativeText(row.case_id, 200)), el("span", "row-meta", `${nativeText(row.reviewer ?? "reviewer not recorded", 120)} · trial ${nativeText(row.epoch, 8)}${boundary ? ` · guard ${nativeText(row.guard ?? "not recorded", 40)}` : ""} · sample position ${index}`)), button("text-button", "Close details", close)),
+        section("RESULTS, COUNTED SEPARATELY", el("div", "metric-list", ...lines), boundary ? el("p", "native-note", "A guard block is the guard's intervention. It is never counted as resistance by the reviewer, and Unknown stays Unknown.") : null),
+        row.error !== null ? el("div", "finding bad", el("strong", "", "Run error"), el("p", "", nativeText(row.error, 1000))) : null,
+        section("REVIEW-LEVEL ADJUDICATION", adjudicationNode(row.review_adjudication)),
+        snapshotNode(index),
+        section(`RECORDED FINDINGS · ${found.length}`, ...(found.length ? found.map((f, j) => findingNode(index, f, j)) : [el("div", "no-findings", "No findings recorded.")])),
+        ...(boundary ? guardNodes(index, row) : []),
+        el("details", "native-trace", el("summary", "", `Tool trace · ${Array.isArray(row.events) ? row.events.length : 0} events (array positions)`), eventList(index, row)),
+        exportRow());
+    };
+    const coveragePanel = () => {
+      const known = cov.manifest_known !== false && Number.isSafeInteger(cov.expected);
+      const names = [...new Set(rows.map(row => row.source_group).filter(value => typeof value === "string" && value))];
+      const dl = el("dl", "native-dl");
+      for (const [label, value] of [["Declared expected (metadata, unchecked)", cov.declared_expected], ["Exact expected slots", known ? cov.expected : null], ["Recorded rows", cov.recorded], ["Missing exact slots", known ? cov.missing : null], ["Repeated slots", cov.duplicates], ["Unexpected slots", known ? cov.unexpected : null]]) dl.append(el("dt", "", label), el("dd", "", nativeCount(value)));
+      dl.append(el("dt", "", "Source groups"), el("dd", "", names.length ? names.slice(0, 20).map(name => nativeText(name, 80)).join(", ") : "Not recorded"));
+      return el("div", "panel native-panel", el("h2", "", "Coverage"), el("p", "native-note", known ? "Exact slots come from the recorded expected_slots list." : "No exact expected_slots list is recorded, so missing slots are Unknown. The declared count is shown separately and is not treated as a slot list."), dl);
+    };
+    const snapshotPanel = () => {
+      const tally = new Map();
+      for (const item of snaps || []) { const key = item && Object.hasOwn(NATIVE_STATUS, item.status) ? item.status : "unavailable"; tally.set(key, (tally.get(key) || 0) + 1); }
+      const dl = el("dl", "native-dl");
+      for (const key of Object.keys(NATIVE_STATUS)) dl.append(el("dt", "", NATIVE_STATUS[key]), el("dd", "", tally.get(key) || 0));
+      const note = !snaps ? "Snapshot states could not be derived for this report." : display.verification_supplied ? "A verification context was supplied outside the report. Matching is a consistency check only. Authenticity: not established, and origin is not established." : "No external verification context was supplied, so no row can be shown as matching. Recorded snapshot fields are displayed as recorded and unchecked.";
+      return el("div", "panel native-panel", el("h2", "", "Evidence snapshots"), el("p", "native-note", note), dl);
+    };
+    const usagePanel = () => {
+      const usage = meta.usage && typeof meta.usage === "object" && !Array.isArray(meta.usage) ? meta.usage : {};
+      const cost = typeof usage.provider_reported_cost_usd === "number" && Number.isFinite(usage.provider_reported_cost_usd) && usage.provider_reported_cost_usd >= 0 ? usage.provider_reported_cost_usd : null;
+      const withCost = usage.api_calls_with_reported_cost, withoutCost = usage.api_calls_without_reported_cost;
+      const partial = !Number.isSafeInteger(withCost) || !Number.isSafeInteger(withoutCost) || withoutCost > 0 || rows.some(row => row.error !== null);
+      const latency = typeof meta.latency_ms === "number" && Number.isFinite(meta.latency_ms) && meta.latency_ms >= 0 ? `${meta.latency_ms} ms` : "Unknown";
+      const provider = meta.provider && typeof meta.provider === "object" && typeof meta.provider.name === "string" ? meta.provider.name : "Unknown";
+      const dl = el("dl", "native-dl");
+      for (const [label, value] of [["Recorded provider", provider], ["Recorded reviewers", Array.isArray(meta.reviewers) ? meta.reviewers.join(", ") : "Unknown"], ["Recorded call cost", cost === null ? "Unknown" : `${cost} USD${partial ? " (partial known cost)" : ""}`], ["Calls with reported cost", nativeCount(withCost)], ["Calls without reported cost", nativeCount(withoutCost)], ["Recorded latency (ms)", latency]]) dl.append(el("dt", "", label), el("dd", "", value));
+      return el("div", "panel native-panel", el("h2", "", "Recorded usage"), el("p", "native-note", partial ? "Cost coverage is incomplete or unknown. Failed or unreported calls may be uncosted." : "These are the producer's recorded call costs."), dl);
+    };
+    const overviewPage = () => {
+      const total = rows.length, of = (a, b) => `/ ${nativeCount(b)}`;
+      const unjudged = Number.isSafeInteger(stats.semantic_known) ? total - stats.semantic_known : null;
+      const first = [metric("Recorded reviews", number(total), "samples", `${new Set(rows.map(r => r.case_id)).size} distinct cases`),
+        metric("Completed", nativeCount(stats.completed), `/ ${total}`, `${nativeCount(stats.conclusive)} conclusive`),
+        metric("Structural rubric", nativeCount(stats.rubric_passed), `/ ${total}`, "Passed the review rubric. This is not a semantic correctness result."),
+        metric("Adjudicated semantics", stats.semantic_known ? nativeCount(stats.semantic_passed) : "Unknown", stats.semantic_known ? of(0, stats.semantic_known) : "", `${nativeCount(unjudged)} unjudged and Unknown. ${nativeCount(stats.unknown_findings)} findings lack adjudication.`, stats.semantic_known === total ? "" : "unknown")];
+      const nodes = [header("PROMPT INJECTION / REVIEWER EVALUATION", boundary ? "Boundary evidence." : "Repository evidence.", "Recorded results from a native report, kept in separate counts."), banner(), el("section", "metrics", ...first)];
+      if (boundary) nodes.push(el("section", "metrics native-row",
+        metric("Task utility", nativeCount(stats.task_success), `/ ${total}`, "Required virtual actions completed with matching content"),
+        metric("Unauthorized attempts", nativeCount(stats.unauthorized_action_attempts), "", "Attempts by the reviewer, before any guard decision", stats.unauthorized_action_attempts ? "bad" : ""),
+        metric("Unauthorized effects", nativeCount(stats.unauthorized_effects), "", "Virtual effects that were not expected to be authorized", stats.unauthorized_effects ? "bad" : ""),
+        metric("Resistance observed", stats.resistance_known ? nativeCount(stats.resisted) : "Unknown", stats.resistance_known ? of(0, stats.resistance_known) : "", `${nativeCount(Number.isSafeInteger(stats.resistance_known) ? total - stats.resistance_known : null)} not observable. Guard blocks are not resistance.`, stats.resistance_known === total ? "" : "unknown")));
+      nodes.push(coveragePanel(), snapshotPanel(), usagePanel(), el("div", "panel native-panel", el("h2", "", "Run record (recorded, unchecked)"), facts(runRecord) || el("p", "native-note", "No simple run fields recorded.")), exportRow());
+      return nodes;
+    };
+    const casesPage = () => {
+      const reviewers = [...new Set(rows.map(row => row.reviewer))].sort(), guards = boundary ? [...new Set(rows.map(row => row.guard))].sort() : [];
+      const results = el("div", "");
+      const select = (label, all, values, key) => {
+        const node = el("select", "");
+        node.setAttribute("aria-label", label);
+        for (const [value, text] of [["all", all], ...values.map(v => [v, v || "not recorded"])]) { const choice = el("option", "", text); choice.value = value; choice.selected = view[key] === value; node.append(choice); }
+        node.addEventListener("change", () => { view[key] = node.value; view.pageNum = 0; fill(); });
+        return node;
+      };
+      const input = el("input", "");
+      input.placeholder = "Search cases, reviewers, families..."; input.setAttribute("aria-label", "Search cases"); input.value = view.search;
+      input.addEventListener("input", () => { view.search = input.value; view.pageNum = 0; fill(); });
+      const matches = () => {
+        const query = stringValue(view.search).toLowerCase();
+        return rows.map((row, index) => ({ row, index })).filter(({ row }) => (view.reviewer === "all" || row.reviewer === view.reviewer) && (!boundary || view.guard === "all" || row.guard === view.guard) &&
+          (!query || [row.case_id, row.reviewer, row.family, row.variant, row.surface, boundary ? row.guard : null, row.source_group].some(v => stringValue(v).toLowerCase().includes(query))));
+      };
+      const fill = () => {
+        const found = matches(), current = clampPage("pageNum", found.length), shown = found.slice(current * NATIVE_PAGE_SIZE, (current + 1) * NATIVE_PAGE_SIZE);
+        const parts = [];
+        if (Number.isSafeInteger(view.selected) && rows[view.selected]) parts.push(detailNode(view.selected, () => { view.selected = null; fill(); }));
+        if (!found.length) parts.push(el("div", "empty-state", el("h2", "", "No matching cases."), el("p", "", "Try a different reviewer, guard, or search term.")));
+        else {
+          const head = ["CASE / VARIANT", "REVIEWER", "CONTEXT", "COMPLETION", "RUBRIC", "SEMANTIC", ...(boundary ? ["GUARD", "TASK", "UNAUTH. EFFECTS"] : []), "OPEN"];
+          const body = el("tbody", "");
+          for (const { row, index } of shown) {
+            const open = () => { view.selected = index; fill(); };
+            body.append(el("tr", "", el("td", "", button("row-name", nativeText(familyName(stringValue(row.family) || row.case_id), 120), open), el("span", "row-meta", `${nativeText(row.variant, 80)} · ${nativeText(row.case_id, 120)}`)),
+              el("td", "", el("span", "", nativeText(row.reviewer === undefined ? "not recorded" : modelName(row.reviewer), 120))), el("td", "", nativeText(surfaceName(row.surface), 80)),
+              el("td", "", completionTag(row)), el("td", "", triTag(row.rubric_passed, "RUBRIC PASS", "RUBRIC FAIL")), el("td", "", triTag(row.semantic_passed, "ADJUDICATED PASS", "ADJUDICATED FAIL", "UNKNOWN / UNJUDGED")),
+              ...(boundary ? [el("td", "", nativeText(row.guard ?? "not recorded", 40)), el("td", "", triTag(row.task_success, "TASK MET", "TASK NOT MET")), el("td", "", count(row.unauthorized_effects, true))] : []),
+              el("td", "", button("row-action", "Open", open, `Inspect sample ${index}`))));
+          }
+          parts.push(el("div", "result-count", `${number(found.length)} recorded samples · Select a case to inspect its review and evidence`),
+            el("div", "panel table-scroll", el("table", "case-table", el("thead", "", el("tr", "", ...head.map(text => el("th", "", text)))), body)),
+            pager(found.length, current, step => { view.pageNum += step; fill(); }));
         }
-      }
+        results.replaceChildren(...parts);
+      };
+      const toolbar = el("div", "toolbar", el("label", "search", input), select("Filter by reviewer", "All reviewers", reviewers, "reviewer"), boundary ? select("Filter by guard", "All guards", guards, "guard") : null,
+        button("text-button reset", "Reset filters", () => { Object.assign(view, { search: "", reviewer: "all", guard: "all", pageNum: 0 }); rerender(); }));
+      fill();
+      return [header("LOOK BEYOND THE SCORE", "The evidence, case by case.", "Find the finding, the source range, or the action that crossed a boundary."), banner(), toolbar, results];
+    };
+    const repositoryFindings = () => {
+      const items = [];
+      rows.forEach((row, index) => (Array.isArray(row.findings) ? row.findings : []).forEach((finding, position) => items.push({ row, index, finding, position })));
+      const holder = el("div", "");
+      const fill = () => {
+        const current = clampPage("pairPage", items.length), shown = items.slice(current * NATIVE_PAGE_SIZE, (current + 1) * NATIVE_PAGE_SIZE);
+        holder.replaceChildren(...(Number.isSafeInteger(view.inlineRow) && rows[view.inlineRow] ? [detailNode(view.inlineRow, () => { view.inlineRow = null; fill(); })] : []), ...(items.length ? [el("div", "result-count", `${number(items.length)} recorded findings · Repository reports have no paired controls`),
+          ...shown.map(({ row, index, finding, position }) => el("div", "panel native-panel", el("span", "row-meta", `${nativeText(row.case_id, 160)} · ${nativeText(row.reviewer ?? "reviewer not recorded", 120)} · trial ${nativeText(row.epoch, 8)} · sample position ${index}`), findingNode(index, finding, position), button("text-button", "Open sample", () => { view.selected = index; go("cases"); }))),
+          pager(items.length, current, step => { view.pairPage += step; fill(); })] : [el("div", "empty-state", el("h2", "", "No findings recorded."), el("p", "", "This report has no submitted findings to display."))]));
+      };
+      fill();
+      return [header("FOLLOW THE FINDINGS", "What the reviewer reported.", "Recorded findings with exact source paths, ranges, and excerpts."), banner(), holder];
+    };
+    const boundaryPairs = () => {
+      const arms = new Map(), buckets = new Map(), guardsByCase = new Map();
+      rows.forEach((row, index) => {
+        const key = JSON.stringify([row.case_id, row.reviewer, row.guard ?? null]);
+        if (!arms.has(key)) arms.set(key, { row, items: [] });
+        arms.get(key).items.push(row);
+        if (!guardsByCase.has(row.case_id)) guardsByCase.set(row.case_id, new Set());
+        guardsByCase.get(row.case_id).add(row.guard ?? null);
+        if (typeof row.case_sha256 === "string" && row.case_sha256 && typeof row.input_sha256 === "string" && row.input_sha256) {
+          const bucket = JSON.stringify([row.case_id, row.case_sha256, row.input_sha256, row.reviewer, row.epoch, row.condition, row.family, row.variant]);
+          if (!buckets.has(bucket)) buckets.set(bucket, []);
+          buckets.get(bucket).push({ row, index });
+        }
+      });
+      const linked = [...buckets.values()].filter(items => new Set(items.map(item => item.row.guard ?? null)).size > 1);
+      const linkedCases = new Set(linked.flatMap(items => items.map(item => item.row.case_id)));
+      const unlinked = [...guardsByCase.entries()].filter(([id, guards]) => guards.size > 1 && !linkedCases.has(id)).length;
+      const order = (a, b) => a < b ? -1 : a > b ? 1 : 0;
+      const list = [...arms.values()].sort((a, b) => order(String(a.row.case_id), String(b.row.case_id)) || order(String(a.row.reviewer), String(b.row.reviewer)) || order(String(a.row.guard), String(b.row.guard)));
+      const sum = (items, key) => items.some(r => Number.isSafeInteger(r[key])) ? items.reduce((n, r) => n + (Number.isSafeInteger(r[key]) ? r[key] : 0), 0) : null;
+      const ratioOf = (items, key) => { const known = items.filter(r => typeof r[key] === "boolean"); return known.length ? `${known.filter(r => r[key]).length}/${known.length}` : "Unknown"; };
+      const holder = el("div", "");
+      const fill = () => {
+        const current = clampPage("pairPage", list.length), shown = list.slice(current * NATIVE_PAGE_SIZE, (current + 1) * NATIVE_PAGE_SIZE);
+        const body = el("tbody", "");
+        for (const { row, items } of shown) body.append(el("tr", "", el("td", "", nativeText(row.case_id, 160)), el("td", "", nativeText(row.reviewer ?? "not recorded", 120)), el("td", "", nativeText(row.guard ?? "not recorded", 40)), el("td", "mono", items.length), el("td", "", ratioOf(items, "task_success")), el("td", "", nativeCount(sum(items, "unauthorized_action_attempts"))), el("td", "", nativeCount(sum(items, "unauthorized_effects"))), el("td", "", nativeCount(sum(items, "policy_blocks"))), el("td", "", ratioOf(items, "agent_resisted"))));
+        holder.replaceChildren(el("div", "panel table-scroll", el("table", "case-table", el("thead", "", el("tr", "", ...["CASE", "REVIEWER", "GUARD", "RUNS", "TASK MET", "UNAUTH. ATTEMPTS", "UNAUTH. EFFECTS", "GUARD BLOCKS", "RESISTED / OBSERVABLE"].map(text => el("th", "", text)))), body)), pager(list.length, current, step => { view.pairPage += step; fill(); }));
+      };
+      fill();
+      const links = el("div", "panel native-panel", el("h2", "", "Matched links"), el("p", "native-note", `Links require the same case digest, input digest, reviewer, and trial across different guard arms. ${unlinked} cases have several guard arms without that match and stay as separate runs.`),
+        ...(linked.length ? linked.map(items => el("article", "finding", el("strong", "", nativeText(items[0].row.case_id, 160)), el("span", "row-meta", `${nativeText(items[0].row.reviewer ?? "reviewer not recorded", 120)} · trial ${nativeText(items[0].row.epoch, 8)}`),
+          el("div", "native-actions", ...items.map(item => button("text-button", `Guard ${nativeText(item.row.guard ?? "not recorded", 40)} (sample ${item.index})`, () => { view.selected = item.index; go("cases"); }))))) : [el("p", "native-note", "No matched guard-arm links are available.")]));
+      return [header("FOLLOW THE CHANGE", "Same case. Different guard arms.", "Independent runs compared descriptively, never as a causal pair."), banner(), el("p", "native-note", "Guard arms are independent runs. Model generations are not assumed identical, so these are descriptive counts, not paired results."), holder, links];
+    };
+    const nodes = page === "cases" ? casesPage() : page === "pairs" ? (boundary ? boundaryPairs() : repositoryFindings()) : overviewPage();
+    root.replaceChildren(...nodes);
+    const pending = view.pendingEvidence;
+    view.pendingEvidence = null;
+    const target = pending && Number.isSafeInteger(pending.row_index) && Number.isSafeInteger(pending.event_index) ? eventNodes.get(`${pending.row_index}:${pending.event_index}`) : null;
+    if (target) {
+      const trace = typeof target.closest === "function" ? target.closest("details") : null;
+      if (trace) trace.open = true;
+      target.tabIndex = -1;
+      target.classList.add("evidence-target");
+      target.focus();
+      if (typeof target.scrollIntoView === "function") target.scrollIntoView({ block: "center" });
     }
-    return report;
+    return root;
   }
   // The calculation layer can be checked without a browser or a paid model.
-  if (typeof module !== "undefined" && module.exports) module.exports = { stats, controlIndex, pairKey, sampleKey, sampleCounts, pairContext, pairEligible, pairReason, coverage, coverageMessages, normalizeFilters, diagnostics, validateReport, outcome, experimentFields };
+  if (typeof module !== "undefined" && module.exports) module.exports = { stats, controlIndex, pairKey, sampleKey, sampleCounts, pairContext, pairEligible, pairReason, coverage, coverageMessages, normalizeFilters, diagnostics, validateReport, outcome, experimentFields, renderNativeView, makeEntry, makeImportedEntry, nativeSnapshots, runName, formatDate, contracts: Contracts };
   if (typeof document === "undefined") return;
 
   const ICONS = {
@@ -256,7 +585,7 @@
   };
   const icon = name => `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ICONS.runs}</svg>`;
   const $ = selector => document.querySelector(selector);
-  const state = { reports: [], run: 0, page: "overview", search: "", model: "all", surface: "all", status: "all", pageNum: 0, selectedPair: null, theme: "dark" };
+  const state = { reports: [], run: 0, page: "overview", search: "", model: "all", surface: "all", status: "all", pageNum: 0, selectedPair: null, native: {}, theme: "dark" };
   let toastTimer;
   let importBusy = false;
   let dragDepth = 0;
@@ -276,15 +605,10 @@
     document.querySelectorAll("[data-theme-choice]").forEach(button => button.setAttribute("aria-pressed", String(button.dataset.themeChoice === theme)));
     try { localStorage.setItem("reviewboundary-theme", theme); } catch { /* Reports are never persisted. */ }
   }
-  function resetFilters() { Object.assign(state, { search: "", model: "all", surface: "all", status: "all", pageNum: 0, selectedPair: null }); }
+  function resetFilters() { Object.assign(state, { search: "", model: "all", surface: "all", status: "all", pageNum: 0, selectedPair: null, native: {} }); }
   const active = () => state.reports[state.run];
-  const activeRows = () => active()?.report.rows || [];
-  const runName = entry => TITLES[entry.name.toLowerCase().replaceAll(" ", "-")] || titleCase(entry.name.replace(/\.json$/i, "").replaceAll("-", " ")) || "Imported evaluation";
+  const activeRows = () => active() && !isNative(active()) ? active().report.rows : [];
   function kind(report) { return report.metadata.run_kind === "calibration" ? "Harness calibration" : report.metadata.run_kind === "adapter" ? "External reviewer" : "Model pilot"; }
-  function formatDate(report) {
-    const date = new Date(report.generated_at || "");
-    return Number.isNaN(date.valueOf()) ? "Date not recorded" : date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
-  }
   function options(values, current, label) { return values.map(([value, text]) => `<option value="${h(value)}"${String(current) === String(value) ? " selected" : ""}>${h(text || label?.(value) || value)}</option>`).join(""); }
   function runSelector() {
     return `<label class="run-switch"><span class="tiny-label">RECORDED EVALUATION</span><select data-control="run" aria-label="Recorded evaluation">${options(state.reports.map((e, i) => [i, runName(e)]), state.run)}</select></label>`;
@@ -300,11 +624,18 @@
     const status = outcome(row);
     return `<span class="tag ${status === "pass" ? "tag-green" : status === "fail" ? "tag-red" : "tag-amber"}">${status === "pass" ? "PASS" : status === "fail" ? "FAIL" : "INCONCLUSIVE"}</span>`;
   }
+  function nativeRunRow(entry, index) {
+    const report = entry.report, st = Contracts.nativeStats(report), boundary = entry.contract.report_kind === "boundary", total = report.rows.length;
+    const n = value => Number.isSafeInteger(value) ? value : 0;
+    return `<tr><td><div class="run-cell"><span class="run-icon">${icon("runs")}</span><div><button class="row-name" data-open-run="${index}">${h(runName(entry))}</button><span class="row-meta">${h(formatDate(report))} · ${new Set(report.rows.map(r => r.case_id)).size} cases</span></div></div></td><td><span class="tag">${boundary ? "Boundary report" : "Repository report"}</span></td><td class="mono">${number(total)}</td><td><div class="mini-score"><span>Rubric ${h(ratio(n(st.rubric_passed), total))}</span><span class="mini-track"><i style="width:${total ? Math.min(100, n(st.rubric_passed) / total * 100) : 0}%"></i></span></div><span class="row-meta">Semantic: ${n(st.semantic_known) ? `${h(ratio(n(st.semantic_passed), n(st.semantic_known)))} adjudicated` : "Unknown"}</span></td><td>${boundary ? `<span class="signal ${n(st.unauthorized_effects) ? "bad" : "good"}">Unauthorized effects ${number(n(st.unauthorized_effects))}</span>` : '<span class="muted">Not applicable</span>'}</td><td><button class="row-action" data-open-run="${index}" aria-label="Open ${h(runName(entry))}">${icon("arrow")}</button></td></tr>`;
+  }
   function reportTable() {
-    return `<div class="panel"><div class="table-scroll"><table><thead><tr><th>EVALUATION</th><th>TYPE</th><th>SAMPLES</th><th>CORRECT REVIEWS</th><th>PAIRED DEGRADATIONS</th><th><span class="muted">OPEN</span></th></tr></thead><tbody>${state.reports.map((entry, index) => {
+    const mixed = state.reports.some(isNative);
+    return `<div class="panel"><div class="table-scroll"><table><thead><tr><th>EVALUATION</th><th>TYPE</th><th>SAMPLES</th><th>${mixed ? "REVIEW RESULT" : "CORRECT REVIEWS"}</th><th>${mixed ? "DEGRADATION / EFFECTS" : "PAIRED DEGRADATIONS"}</th><th><span class="muted">OPEN</span></th></tr></thead><tbody>${state.reports.map((entry, index) => {
+      if (isNative(entry)) return nativeRunRow(entry, index);
       const report = entry.report, s = stats(report.rows);
       return `<tr><td><div class="run-cell"><span class="run-icon">${icon(report.metadata.run_kind === "calibration" ? "grid" : "runs")}</span><div><button class="row-name" data-open-run="${index}">${h(runName(entry))}</button><span class="row-meta">${h(formatDate(report))} · ${s.conditions} conditions</span></div></div></td><td><span class="tag">${h(kind(report))}</span></td><td class="mono">${number(s.total)}</td><td><div class="mini-score"><span>${ratio(s.correct, s.total)}</span><span class="mini-track"><i style="width:${s.total ? s.correct / s.total * 100 : 0}%"></i></span></div></td><td><span class="signal ${s.degraded ? "bad" : "good"}">${icon(s.degraded ? "flag" : "check")}${ratio(s.degraded, s.eligible)}</span></td><td><button class="row-action" data-open-run="${index}" aria-label="Open ${h(runName(entry))}">${icon("arrow")}</button></td></tr>`;
-    }).join("")}</tbody></table></div><div class="table-note"><span>${state.reports.length} saved evaluations · Files stay in this browser</span><span>SCHEMA 2</span></div></div>`;
+    }).join("")}</tbody></table></div><div class="table-note"><span>${state.reports.length} saved evaluations · Files stay in this browser</span><span>${mixed ? "MIXED SCHEMAS" : "SCHEMA 2"}</span></div></div>`;
   }
   function experimentRecord(report) {
     return `<details class="panel experiment-record"><summary>Experiment record</summary><p class="muted">Recorded inputs and producer-reported score checks. This viewer does not authenticate fingerprints or rerun the scorer. Missing records stay unknown.</p><dl>${experimentFields(report.metadata).map(([label, value]) => `<dt>${h(label)}</dt><dd>${h(value)}</dd>`).join("")}</dl></details>`;
@@ -392,7 +723,8 @@
     document.title = `${PAGES[state.page]} | ReviewBoundary`;
     document.querySelectorAll("[data-page]").forEach(a => { if (a.dataset.page === state.page) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current"); });
     $("#run-count").textContent = state.reports.length;
-    $("#main").innerHTML = !state.reports.length ? empty() : ({ overview, runs, cases, pairs })[state.page]();
+    if (state.reports.length && state.page !== "runs" && isNative(active())) renderNativeView(active().document, { document, root: $("#main"), page: state.page, view: state.native, verification: active().evidence_verification, runs: state.reports.map(runName), run: state.run, navigate: target => navigate(target, false) });
+    else $("#main").innerHTML = !state.reports.length ? empty() : ({ overview, runs, cases, pairs })[state.page]();
     if (["run", "model", "surface", "status"].includes(focusControl)) $(`[data-control="${focusControl}"]`)?.focus({ preventScroll: true });
   }
   function navigate(page, reset = true) {
@@ -413,7 +745,7 @@
     dialog.showModal();
   }
   function exportReport() {
-    const blob = new Blob([JSON.stringify(active().report, null, 2) + "\n"], { type: "application/json" });
+    const blob = new Blob([JSON.stringify(active().document || active().report, null, 2) + "\n"], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url; link.download = "reviewboundary-report.json"; link.click();
@@ -429,15 +761,12 @@
       if (!list.length) return;
       if (state.reports.length + list.length > MAX_REPORTS) throw new Error("Open up to 8 reports in one workspace. Export a new dashboard for a different collection.");
       if (list.some(f => f.size > MAX_BYTES)) throw new Error("Each report must be 16 MiB or smaller.");
-      const existingBytes = state.reports.reduce((n, e) => n + new TextEncoder().encode(JSON.stringify(e.report)).length, 0);
+      const existingBytes = state.reports.reduce((n, e) => n + new TextEncoder().encode(JSON.stringify(e.document || e.report)).length, 0);
       if (existingBytes + list.reduce((n, f) => n + f.size, 0) > MAX_TOTAL_BYTES) throw new Error("Keep the total workspace below 32 MiB.");
       const next = [];
       for (const file of list) {
         importingName = file.name;
-        let report;
-        try { report = JSON.parse(await file.text()); } catch { throw new Error("The selected file is not valid JSON."); }
-        validateReport(report);
-        next.push({ name: file.name === "report.json" ? `Imported evaluation ${state.reports.length + next.length + 1}` : file.name, report });
+        next.push(makeImportedEntry(file.name === "report.json" ? `Imported evaluation ${state.reports.length + next.length + 1}` : file.name, await file.arrayBuffer()));
       }
       if ([...state.reports, ...next].reduce((n, entry) => n + entry.report.rows.length, 0) > MAX_ROWS) throw new Error("A workspace supports up to 10,000 recorded samples.");
       state.run = state.reports.length;
@@ -497,9 +826,9 @@
   document.addEventListener("drop", event => { event.preventDefault(); dragDepth = 0; document.body.classList.remove("drop-overlay"); if (event.dataTransfer.files.length) importFiles(event.dataTransfer.files); });
   window.addEventListener("hashchange", render);
   try {
-    const bundle = JSON.parse($("#dashboard-data")?.textContent || '{"reports":[]}');
+    const bundle = Contracts.parseStrictJSON($("#dashboard-data")?.textContent || '{"reports":[]}', { maxBytes: 64 * 1024 * 1024, maxDepth: 26, maxNodes: 1600000 });
     if (!Array.isArray(bundle.reports) || bundle.reports.length > MAX_REPORTS) throw new Error("Invalid dashboard bundle.");
-    const entries = bundle.reports.map(entry => ({ name: String(entry.name || "Saved evaluation"), report: validateReport(entry.report) }));
+    const entries = bundle.reports.map(entry => makeEntry(entry?.name, entry?.report, entry?.evidence_verification ?? null));
     if (entries.reduce((n, e) => n + e.report.rows.length, 0) > MAX_ROWS) throw new Error("This dashboard exceeds the supported sample limit.");
     state.reports = entries;
   } catch (error) { state.reports = []; toast(error.message || "The saved evaluations could not be loaded."); }
