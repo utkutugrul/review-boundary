@@ -18,6 +18,23 @@ Provider and authentication overrides are rejected by name, without echoing thei
 
 The runner pins official endpoint URLs. It does not accept arbitrary model arguments, custom endpoints, cloud service prefixes, or fallback authentication from the native CLI. This restriction concerns provider selection and authentication; it is not a network sandbox for the host process.
 
+## Tool argument validation
+
+OpenRouter runs explicitly set Inspect's `strict_tools=False`. The native tool
+contract includes optional fields and defaults, such as the `list_files` cursor
+and the `read_file` start line. [OpenAI strict function calling](https://developers.openai.com/api/docs/guides/function-calling#strict-mode)
+requires every property to be required, so enabling it for these schemas can
+cause a provider to reject the whole request. The provider request metadata
+records `strict_tools: false`; the tool definitions and their defaults are
+preserved.
+
+Repository and boundary worlds enforce their strict argument, range, path, and
+resource checks when dispatching calls. Boundary mode also records malformed
+effect calls and unknown tools in its attempt metrics. Provider-side tool
+generation therefore uses the existing optional-argument contract while the
+evaluator validates each operation. Native OpenAI and Anthropic keep their
+existing transport settings.
+
 ## Native pricing files
 
 Native OpenAI and Anthropic runs require `--pricing-file`, including dry runs. The file is a local operator-supplied quote for every selected model. It records the provider, an official HTTPS pricing-source URL, the date checked, and numeric USD prices per million tokens. It is validated and hashed; its contents are not automatically fetched or price-verified.
