@@ -67,6 +67,7 @@ def parser():
         command.add_argument("--policy", type=Path, help="Optional trusted local policy process")
         if name == "boundary-run-adapter":
             command.add_argument("--adapter", type=Path, required=True)
+            command.add_argument("--suite", type=Path, help="Custom bounded boundary suite")
     boundary_model = commands.add_parser(
         "boundary-run-model", help="Run provider models with virtual action boundaries"
     )
@@ -221,18 +222,73 @@ def parser():
         action="store_true",
         help="Explicitly retain original scores without checking them against the supported scorer",
     )
+    report_export = commands.add_parser(
+        "report-export",
+        help="Create a deterministic version 3 envelope around recorded report data",
+        description="Wrap a recorded legacy, repository or boundary report without rescoring it.",
+        epilog=(
+            "Snapshot artifacts: {schema_version:1,source_report_sha256,"
+            "snapshots:[{row_index,source_row_sha256,snapshot}]}. Digests identify the canonical "
+            "native report and row. Optional suite JSON: {schema_version:1,cases:[...]}, "
+            "with at most 32 cases. Snapshots stay local; matching establishes supplied-data "
+            "consistency, not artifact origin or evaluator judgment authenticity."
+        ),
+    )
+    report_export.add_argument("source", type=Path)
+    report_export.add_argument("--output", type=Path, required=True, help="New private JSON file")
+    report_export.add_argument(
+        "--snapshot-artifacts", type=Path, help="Explicit digest-bound JSON snapshots, kept local"
+    )
+    report_export.add_argument(
+        "--suite", type=Path, help="Optional bounded JSON case data for snapshot restoration"
+    )
     compare = commands.add_parser("compare", help="Fail on new per-sample regressions")
     compare.add_argument("baseline", type=Path)
     compare.add_argument("candidate", type=Path)
     compare.add_argument("--output", type=Path)
     for selector in ("baseline-model", "baseline-defense", "candidate-model", "candidate-defense"):
         compare.add_argument("--" + selector)
+    for selector in ("baseline-reviewer", "candidate-reviewer"):
+        compare.add_argument("--" + selector)
+    for selector in ("baseline-guard", "candidate-guard"):
+        compare.add_argument("--" + selector, choices=("on", "off"))
+    compare.add_argument(
+        "--expected-suite", type=Path, help="Explicit bounded native JSON case data"
+    )
     dashboard = commands.add_parser("dashboard", help="Export a self-contained report dashboard")
     dashboard.add_argument("reports", nargs="*", type=Path)
     dashboard.add_argument("--output", type=Path, default=Path("reports/dashboard.html"))
-    ci = commands.add_parser("ci", help="Reproduce a baseline's cases and check for regressions")
+    dashboard.add_argument(
+        "--snapshot-artifacts", type=Path, help="Digest-bound JSON snapshots for exactly one report"
+    )
+    dashboard.add_argument(
+        "--suite", type=Path, help="Optional bounded JSON case data for snapshot restoration"
+    )
+    ci = commands.add_parser(
+        "ci",
+        help="Reproduce a baseline's cases and check for regressions",
+        epilog="Native model profiles require --mode model. Native App publication is unsupported.",
+    )
     ci.add_argument("baseline", type=Path)
     ci.add_argument("--output", type=Path, required=True)
+    ci.add_argument(
+        "--profile",
+        choices=(
+            "legacy",
+            "repository-adapter",
+            "boundary-adapter",
+            "repository-model",
+            "boundary-model",
+        ),
+        default="legacy",
+        help="Native adapter profiles require a separate host without provider/App credentials",
+    )
+    ci.add_argument("--suite", dest="suite_path", type=Path)
+    ci.add_argument("--adapter", dest="adapter_path", type=Path)
+    ci.add_argument("--baseline-reviewer")
+    ci.add_argument("--candidate-reviewer")
+    ci.add_argument("--baseline-guard", choices=("on", "off"))
+    ci.add_argument("--candidate-guard", choices=("on", "off"))
     ci.add_argument("--mode", choices=("calibration", "model"), default="calibration")
     ci.add_argument(
         "--provider", choices=("openrouter", "openai", "anthropic"), default="openrouter"
@@ -243,6 +299,10 @@ def parser():
     ci.add_argument("--baseline-defense")
     ci.add_argument("--pricing-file", type=Path)
     ci.add_argument("--budget", type=float, default=20.0)
+    ci.add_argument("--prompt-price-cap", type=float, help="Native model CI input admission cap")
+    ci.add_argument(
+        "--completion-price-cap", type=float, help="Native model CI output admission cap"
+    )
     from .github_cli import add_commands
 
     add_commands(commands)
@@ -592,6 +652,22 @@ def run(args, cases_override=None):
     )
 
 
+def _format_native_comparison(result):
+    summary = result["summary"]
+    lines = [
+        f"ReviewBoundary {result['report_kind']} comparison: {result['status'].upper()}",
+        (
+            f"Expected samples: {summary['expected_samples']}; paired: {summary['paired_samples']}; "
+            f"regressions: {summary['regressed_samples']}; improvements: {summary['improved_samples']}"
+        ),
+        f"Evidence availability changes: {summary['evidence_availability_changes']}",
+    ]
+    for change in result["regressions"]:
+        codes = ", ".join(reason["code"] for reason in change["reasons"])
+        lines.append(f"  {change['case_id']} epoch {change['epoch']}: {codes}")
+    return "\n".join(lines)
+
+
 def main(argv=None):
     args = parser().parse_args(argv)
     try:
@@ -655,8 +731,27 @@ def main(argv=None):
             )
         if args.command == "dashboard":
             from .dashboard import default_report_paths, write_dashboard
+            from .json_input import read_json_object
 
-            output = write_dashboard(args.reports or default_report_paths(), args.output)
+            evidence = {
+                name: read_json_object(path.expanduser())
+                for name in ("snapshot_artifacts", "suite")
+                if (path := getattr(args, name)) is not None
+            }
+            output = write_dashboard(
+                args.reports or default_report_paths(), args.output, **evidence
+            )
+            print(output.resolve())
+            return 0
+        if args.command == "report-export":
+            from .report_export import write_report_export
+
+            output = write_report_export(
+                args.source,
+                args.output,
+                snapshot_artifacts=args.snapshot_artifacts,
+                suite=args.suite,
+            )
             print(output.resolve())
             return 0
         if args.command in ("github-preview", "github-publish"):
@@ -680,6 +775,15 @@ def main(argv=None):
                         "baseline_defense",
                         "pricing_file",
                         "budget",
+                        "profile",
+                        "suite_path",
+                        "adapter_path",
+                        "baseline_reviewer",
+                        "candidate_reviewer",
+                        "baseline_guard",
+                        "candidate_guard",
+                        "prompt_price_cap",
+                        "completion_price_cap",
                     )
                 },
             )
@@ -707,31 +811,43 @@ def main(argv=None):
             print(report.resolve())
             return 0
         if args.command == "compare":
-            from .compare import compare_reports, format_comparison
+            from .compare import format_comparison
             from .json_input import read_json_object
+            from .native_compare import compare_report_documents
 
-            if args.output and args.output.resolve() in (
-                args.baseline.resolve(),
-                args.candidate.resolve(),
+            if args.output and any(
+                args.output.resolve() == source.resolve()
+                or (args.output.exists() and source.exists() and args.output.samefile(source))
+                for source in (args.baseline, args.candidate)
             ):
                 raise ValueError("Comparison output must not overwrite either source report")
-            result = compare_reports(
+            selectors = {
+                key: getattr(args, key)
+                for key in (
+                    "baseline_model",
+                    "baseline_defense",
+                    "candidate_model",
+                    "candidate_defense",
+                    "baseline_reviewer",
+                    "candidate_reviewer",
+                    "baseline_guard",
+                    "candidate_guard",
+                )
+            }
+            if args.expected_suite is not None:
+                selectors["expected_suite"] = read_json_object(args.expected_suite.expanduser())
+            result = compare_report_documents(
                 read_json_object(args.baseline),
                 read_json_object(args.candidate),
-                **{
-                    key: getattr(args, key)
-                    for key in (
-                        "baseline_model",
-                        "baseline_defense",
-                        "candidate_model",
-                        "candidate_defense",
-                    )
-                },
+                **selectors,
             )
             if args.output:
                 args.output.parent.mkdir(parents=True, exist_ok=True)
                 args.output.write_text(json.dumps(result, indent=2) + "\n")
-            print(format_comparison(result))
+            if result.get("report_kind") in ("repository", "boundary"):
+                print(_format_native_comparison(result))
+            else:
+                print(format_comparison(result))
             return result["exit_code"]
         return run(args)
     except (ValueError, OSError, HTTPError, URLError, ProviderRequestError) as exc:

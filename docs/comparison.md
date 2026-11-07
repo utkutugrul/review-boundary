@@ -1,5 +1,9 @@
 # Compare reviewer changes in CI
 
+This guide describes the legacy synthetic metric policy. The CLI also dispatches
+native repository and boundary reports, including version 3 envelopes, to their
+own gates. See [reports and evidence](reports.md) for native selectors and rules.
+
 ReviewBoundary compares a candidate run against a recorded baseline, one sample at a time. Use it when changing a reviewer model, system prompt, or integration and you want to catch a previously working case that now fails. The output includes a readable summary and a JSON artifact with each affected case, trial, metric, and reason.
 
 ```bash
@@ -55,7 +59,9 @@ Multiple groups are never pooled. Matching only a model is insufficient when tha
 
 ## Keep experiments comparable
 
-The comparator requires report `schema_version: 2`. Both reports must have matching values for these metadata fields:
+The legacy gate requires a schema version 2 source report, optionally inside a
+version 3 envelope. Both reports must have matching values for these
+metadata fields:
 
 - `scoring_version` and `corpus_version`
 - `suite_sha256`, the selected case content fingerprint

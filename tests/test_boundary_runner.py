@@ -61,6 +61,52 @@ def child_program(tmp_path, program):
     return path
 
 
+def test_boundary_adapter_custom_suite_uses_exact_case_data_and_historical_digest(tmp_path):
+    from review_boundary.provenance import json_digest
+
+    cases = build_boundary_cases()[:2]
+    suite = tmp_path / "custom-suite.json"
+    value = {"schema_version": 1, "cases": [case.model_dump(mode="json") for case in cases]}
+    suite.write_text(json.dumps(value))
+    output = tmp_path / "custom-adapter"
+    selected = args(output, adapter=CONFIG, guard="on")
+    selected.suite = suite
+    assert run_boundary_command(selected) == 0
+    report = json.loads((output / "report.json").read_text())
+    assert report["metadata"]["corpus_version"] == "custom"
+    assert report["metadata"]["case_count"] == 2
+    assert report["metadata"]["expected_count"] == 2
+    assert report["metadata"]["suite_sha256"] == json_digest(value["cases"])
+    assert {row["case_id"] for row in report["rows"]} == {case.case_id for case in cases}
+    assert json.loads((output / "suite.json").read_text()) == value
+
+
+@pytest.mark.parametrize("damage", ("empty", "duplicate", "float_version", "unknown_field"))
+def test_boundary_adapter_invalid_custom_suite_stops_before_transport(
+    tmp_path, monkeypatch, damage
+):
+    from review_boundary import boundary_runner
+
+    case = build_boundary_cases()[0].model_dump(mode="json")
+    value = {"schema_version": 1, "cases": [case]}
+    if damage == "empty":
+        value["cases"] = []
+    elif damage == "duplicate":
+        value["cases"] = [case, case]
+    elif damage == "float_version":
+        value["schema_version"] = 1.0
+    else:
+        value["run"] = "caller-code"
+    suite = tmp_path / "invalid-suite.json"
+    suite.write_text(json.dumps(value))
+    selected = args(tmp_path / "output", adapter=CONFIG)
+    selected.suite = suite
+    monkeypatch.setattr(boundary_runner, "run_adapter", lambda *a, **k: pytest.fail("transport"))
+    with pytest.raises(ValueError):
+        run_boundary_command(selected)
+    assert not selected.output.exists()
+
+
 def small_suite(monkeypatch, *, attack=True):
     case = next(case for case in build_boundary_cases() if (case.condition == "attack") == attack)
     monkeypatch.setattr("review_boundary.boundary_runner.build_boundary_cases", lambda: (case,))

@@ -7,8 +7,13 @@ from html.parser import HTMLParser
 from pathlib import Path
 
 import pytest
+from report_contract_support import native_fixture
 
 from review_boundary import cli, dashboard
+from review_boundary.boundary_runner import boundary_error_rows
+from review_boundary.provenance import json_digest
+from review_boundary.report_contract import export_report_envelope
+from review_boundary.repository_runner import repository_error_rows
 
 
 class EmbeddedData(HTMLParser):
@@ -83,9 +88,11 @@ def assets(monkeypatch):
     content = {
         "index.html": (
             "<!doctype html><html><head><style>/*__DASHBOARD_CSS__*/</style></head><body>"
-            "<!--__DASHBOARD_DATA__--><script>/*__DASHBOARD_JS__*/</script></body></html>"
+            "<!--__DASHBOARD_DATA__--><script>/*__REPORT_CONTRACT_JS__*/</script>"
+            "<script>/*__DASHBOARD_JS__*/</script></body></html>"
         ),
         "dashboard.css": "body { color: white; background: black; }",
+        "report-contracts.js": "globalThis.ReviewBoundaryReportContracts = {};",
         "dashboard.js": 'document.body.dataset.ready = "true";',
     }
     monkeypatch.setattr(dashboard, "_assets", lambda: content)
@@ -113,7 +120,7 @@ def test_script_breaking_text_is_escaped_and_original_data_round_trips(tmp_path,
     assert dashboard.write_dashboard([source], output) == output
     html = output.read_text()
     parsed = EmbeddedData(html)
-    assert len(parsed.scripts) == 2
+    assert len(parsed.scripts) == 3
     assert parsed.parsed() == {"reports": [{"name": "readable report name", "report": payload}]}
     assert "<img src=x" not in html and "<script>globalThis.pwned" not in html
     assert "\\u003c/script\\u003e" in html and "\\u0026" in html
@@ -143,6 +150,36 @@ def test_replacement_markers_inside_report_text_are_preserved(tmp_path, assets):
     source = save_report(tmp_path, payload)
     output = dashboard.write_dashboard([source], tmp_path / "dashboard.html")
     assert EmbeddedData(output.read_text()).parsed()["reports"][0]["report"] == payload
+
+
+def test_same_directory_names_are_distinct_stable_and_preserve_unique_names(tmp_path, assets):
+    first_payload = report()
+    second_payload = export_report_envelope(native_fixture()[0])
+    first = save_report(tmp_path / "shared_reports", first_payload, "first.json")
+    second = save_report(tmp_path / "shared_reports", second_payload, "second.json")
+    unique = save_report(tmp_path / "unique_run", name="report.json")
+    sources = [first, second, unique]
+    original_bytes = [source.read_bytes() for source in sources]
+
+    def entries(paths, name):
+        output = dashboard.write_dashboard(paths, tmp_path / name)
+        return EmbeddedData(output.read_text()).parsed()["reports"]
+
+    forward = entries(sources, "forward.html")
+    assert [entry["name"] for entry in forward] == [
+        "shared reports / first.json",
+        "shared reports / second.json",
+        "unique run",
+    ]
+    assert forward == entries(sources, "repeat.html")
+    assert entries(list(reversed(sources)), "reversed.html") == list(reversed(forward))
+    assert [entry["report"] for entry in forward] == [first_payload, second_payload, report()]
+    assert [source.read_bytes() for source in sources] == original_bytes
+    repeated = entries([first, first], "duplicates.html")
+    assert [entry["name"] for entry in repeated] == [
+        "shared reports / first.json",
+        "shared reports / first.json (2)",
+    ]
 
 
 @pytest.mark.parametrize("alias", ["same", "symlink", "hardlink"])
@@ -388,3 +425,115 @@ def test_packaged_frontend_and_recorded_examples_export_together(tmp_path):
     assert 'src="dashboard.js"' not in html
     assert 'href="dashboard.css"' not in html
     assert "/*__DASHBOARD_CSS__*/" not in html and "/*__DASHBOARD_JS__*/" not in html
+    assert "/*__REPORT_CONTRACT_JS__*/" not in html
+    assert 'src="report-contracts.js"' not in html
+    assert html.index("root.ReviewBoundaryReportContracts = api") < html.index("const Contracts =")
+
+
+@pytest.mark.parametrize("kind", ["repository", "boundary"])
+@pytest.mark.parametrize("wrapped", [False, True])
+def test_native_documents_round_trip_without_invented_measurements(tmp_path, assets, kind, wrapped):
+    payload, _, _ = native_fixture(kind)
+    payload["metadata"]["run_finished"] = False
+    payload["metadata"]["evidence_verification"] = {"status": "matching_supplied_artifact"}
+    payload["rows"][0]["semantic_passed"] = None
+    if wrapped:
+        payload = export_report_envelope(payload)
+    before = deepcopy(payload)
+    source = save_report(tmp_path, payload)
+    output = dashboard.write_dashboard([source], tmp_path / "dashboard.html")
+    entry = EmbeddedData(output.read_text()).parsed()["reports"][0]
+    assert entry["report"] == before
+    assert "evidence_verification" not in entry
+    assert source.read_text() == json.dumps(before)
+
+
+def test_wrapped_legacy_document_retains_optional_unknown_metrics(tmp_path, assets):
+    payload = report()
+    payload["rows"][0]["issue_reported"] = None
+    wrapped = export_report_envelope(payload)
+    source = save_report(tmp_path, wrapped)
+    output = dashboard.write_dashboard([source], tmp_path / "dashboard.html")
+    entry = EmbeddedData(output.read_text()).parsed()["reports"][0]
+    assert entry["report"] == wrapped
+    assert entry["report"]["report"]["rows"][0]["issue_reported"] is None
+
+
+@pytest.mark.parametrize("kind", ["repository", "boundary"])
+def test_native_provider_errors_remain_unjudged_display_data(tmp_path, assets, kind):
+    payload, case, _ = native_fixture(kind)
+    if kind == "repository":
+        rows = repository_error_rows((case,), "fixture/reference", 1, "provider_error")
+    else:
+        rows = boundary_error_rows((case,), "fixture/reference", 1, ["off"], "provider_error")
+    payload["rows"] = rows
+    source = save_report(tmp_path, payload)
+    output = dashboard.write_dashboard([source], tmp_path / "dashboard.html")
+    embedded = EmbeddedData(output.read_text()).parsed()["reports"][0]["report"]
+    assert embedded == payload
+    assert embedded["rows"][0]["semantic_passed"] is None
+    assert embedded["rows"][0]["error"]
+
+
+def test_native_binding_consistency_context_is_separate_and_contains_no_snapshots(tmp_path, assets):
+    payload, case, world = native_fixture()
+    snapshot = world.snapshot()
+    artifacts = {
+        "schema_version": 1,
+        "source_report_sha256": json_digest(payload),
+        "snapshots": [
+            {
+                "row_index": 0,
+                "source_row_sha256": json_digest(payload["rows"][0]),
+                "snapshot": snapshot,
+            }
+        ],
+    }
+    source = save_report(tmp_path, payload)
+    output = dashboard.write_dashboard(
+        [source],
+        tmp_path / "dashboard.html",
+        snapshot_artifacts=artifacts,
+        suite={"schema_version": 1, "cases": [case.model_dump(mode="json")]},
+    )
+    entry = EmbeddedData(output.read_text()).parsed()["reports"][0]
+    assert entry["report"] == payload
+    context = entry["evidence_verification"]
+    assert context["source_report_sha256"] == json_digest(payload)
+    assert context["rows"][0]["status"] == "matching_supplied_artifact"
+    assert context["rows"][0]["case_validation"] == "restored_and_observations_match"
+    assert context["rows"][0]["authenticity"] == "not_established"
+    assert "snapshots" not in entry
+
+
+def test_external_snapshot_context_requires_one_unambiguous_report(tmp_path, assets):
+    payload, _, _ = native_fixture()
+    source = save_report(tmp_path, payload)
+    for sources in ([], [source, source]):
+        with pytest.raises(ValueError, match="exactly one"):
+            dashboard.write_dashboard(sources, tmp_path / "dashboard.html", snapshot_artifacts={})
+    assert not (tmp_path / "dashboard.html").exists()
+
+
+@pytest.mark.parametrize("limit", ["MAX_ROWS", "MAX_EVENTS_PER_ROW", "MAX_FINDINGS_PER_REVIEW"])
+def test_native_public_dashboard_limits_remain_monkeypatchable(
+    tmp_path, assets, monkeypatch, limit
+):
+    payload, _, _ = native_fixture()
+    monkeypatch.setattr(dashboard, limit, 0)
+    with pytest.raises(ValueError, match="rows|events|findings"):
+        dashboard.write_dashboard([save_report(tmp_path, payload)], tmp_path / "dashboard.html")
+
+
+def test_wrapped_report_rows_count_toward_aggregate_limit(tmp_path, assets, monkeypatch):
+    payload, _, _ = native_fixture()
+    source = save_report(tmp_path, export_report_envelope(payload))
+    monkeypatch.setattr(dashboard, "MAX_ROWS", 1)
+    with pytest.raises(ValueError, match="total at most"):
+        dashboard.write_dashboard([source, source], tmp_path / "dashboard.html")
+
+
+def test_contract_helper_is_inlined_before_dashboard_application(tmp_path, assets):
+    output = dashboard.write_dashboard([], tmp_path / "dashboard.html")
+    html = output.read_text()
+    assert html.index(assets["report-contracts.js"]) < html.index(assets["dashboard.js"])

@@ -198,6 +198,19 @@ def test_native_task_records_actual_selected_instructions_and_tool_schemas():
     assert value["tools"] == {"protocol": "inspect", "sha256": json_digest(native_tool_schemas())}
     assert value["harness"]["status"] == "recorded"
     assert value["reviewer_source"]["status"] == "not_recorded"
+    assert {
+        "native_compare.py",
+        "report_validation.py",
+        "report_contract.py",
+        "evidence_refs.py",
+        "report_export.py",
+        "dashboard.py",
+        "repository_adjudication.py",
+        "repository_adjudication_agreement.py",
+        "repository_adjudication_ui.py",
+    }.issubset(value["harness"]["files"])
+    assert len(value["harness"]["files"]) == len(set(provenance.HARNESS_FILES))
+    assert len(value["harness"]["files"]) <= provenance.MAX_HARNESS_FILES == 128
 
 
 def test_expanded_harness_inventory_does_not_expand_reviewer_source_limit():

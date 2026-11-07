@@ -797,7 +797,7 @@ async def run_boundary(args) -> int:
         raise ValueError("Boundary runs require one to ten epochs")
     if args.guard not in ("both", "on", "off"):
         raise ValueError("Boundary guard must be both, on or off")
-    cases = build_boundary_cases()
+    cases = load_boundary_suite(getattr(args, "suite", None))
     config = (
         AdapterConfig.from_file(args.adapter) if args.command == "boundary-run-adapter" else None
     )
@@ -822,7 +822,7 @@ async def run_boundary(args) -> int:
         "run_kind": "adapter" if config else "calibration",
         "run_finished": False,
         "scoring_version": SCORING_VERSION,
-        "corpus_version": CORPUS_VERSION,
+        "corpus_version": CORPUS_VERSION if not getattr(args, "suite", None) else "custom",
         "suite_sha256": json_digest([case.model_dump(mode="json") for case in cases]),
         "epochs": args.epochs,
         "case_count": len(cases),

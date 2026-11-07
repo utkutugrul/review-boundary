@@ -337,6 +337,7 @@ def _repository_model_paths(
             "report.json",
             "report.html",
             "logs",
+            "logs/repository-failures.json",
             "settlement.json",
         )
     )
@@ -472,6 +473,7 @@ def run_repository_model(args) -> int:
     logs = []
     integrity_error = False
     incomplete_provider_usage = False
+    provider_failed_reviewers = []
     for model_id, reviewer in zip(model_ids, reviewers, strict=True):
         print(
             f"Running {model_id}: {len(cases)} repository cases x {args.epochs} epochs",
@@ -489,6 +491,7 @@ def run_repository_model(args) -> int:
             )
         except ProviderRequestError:
             rows.extend(repository_error_rows(cases, reviewer, args.epochs, "provider_error"))
+            provider_failed_reviewers.append(reviewer)
             integrity_error = True
             incomplete_provider_usage = True
         else:
@@ -518,6 +521,12 @@ def run_repository_model(args) -> int:
     metadata["run_finished"] = True
     (output / "manifest.json").write_text(json.dumps(metadata, indent=2) + "\n")
     report = write_repository_report(rows, output, metadata)
+    if provider_failed_reviewers:
+        from .repository_adjudication import write_repository_failure_evidence
+
+        write_repository_failure_evidence(
+            output / "report.json", cases, provider_failed_reviewers, output / "logs"
+        )
     log_error = any(
         log.status != "success" or any(sample.error for sample in log.samples or []) for log in logs
     )
