@@ -155,7 +155,9 @@ reasoning. `semantic_passed` stays `null` until explicit evaluator adjudication.
 Unjudged findings remain `unknown_findings`, not false positives. Duplicate
 findings do not increase unique issue or adjudication counts.
 
-Adjudication is **Python API only** through `score_repository_world()`:
+Adjudication is applied through `score_repository_world()`. Two commands wrap it
+for native model runs (`adjudication-export` and `adjudication-apply`, described
+below); there is no automatic semantic judge:
 
 - `FindingAdjudication` binds `case_sha256` and `finding_sha256` to a decision
   of `supported`, `rejected`, or `unknown`, with a reason and optional `issue_id`.
@@ -166,7 +168,75 @@ Adjudication is **Python API only** through `score_repository_world()`:
 Use `case_digest()`, `finding_digest()`, and `review_digest()` for these identities.
 Changed content invalidates the binding. Supply finding decisions as
 `adjudications=` and the whole-review decision as `review_adjudication=`.
-There is no automatic semantic judge or adjudication-import CLI.
+
+### Adjudication artifacts
+
+```bash
+review-boundary adjudication-export --report run/report.json --suite run/suite.json \
+  --output template.json
+review-boundary adjudication-apply --report run/report.json --suite run/suite.json \
+  --adjudication labeled.json --logs run/logs --output run-adjudicated
+```
+
+The artifact (`adjudication_kind: "repository"`, `schema_version: 1`) holds the
+canonical `source_report_sha256`, `finding_decisions`, and `review_decisions`. It
+contains digests, decisions, issue mappings, and reasons only: no prompts, model
+responses, or finding text. The export lists each unique finding and review as
+`unknown`.
+
+Import fails closed on a stale or foreign report digest, unknown case, finding,
+or review digests, digests from rows that recorded an error, duplicate or
+conflicting decisions, unknown issue IDs, an `unknown` decision carrying an issue
+mapping, and a `supported` finding mapped to an `absent` issue. Partial artifacts
+are accepted; unlisted findings stay `unknown`.
+
+Application never reads semantics from report rows. It restores each row's frozen
+world snapshot from the trusted Inspect logs, rescores it against the original
+evaluator suite, requires the result to equal the source row, and then changes
+only the adjudication fields. An edited row, review, or event trace is rejected.
+The output is a new directory; the source report is not modified. Only native
+`repository-run-model` runs retain snapshots, so calibration and adapter reports
+cannot be adjudicated this way yet. Boundary reports are not supported.
+
+### Labeling page
+
+```bash
+review-boundary adjudication-ui --report run/report.json --suite run/suite.json \
+  --output labeler.html
+```
+
+This writes one new HTML file (an existing output, a symlink, or an input path is
+refused). Open it locally. It shows each unique finding and whole review with its
+recorded text and the evaluator rubric issues, and starts every item as `unknown`.
+You can edit only the decision, an optional issue mapping, and the reason. Moving
+an item off `unknown` clears the placeholder reason, so a real one must be written.
+Nothing is pre-judged. **Export artifact** downloads `repository-adjudication.json`;
+**Import labels** loads a previous export (unlisted items stay `unknown`).
+
+The page makes no network requests and loads no CDN assets. Its CSP allows only the
+page's own script and style by SHA-256 hash, recorded text is embedded as escaped
+inert JSON, and the page is built from text nodes only. Imports are limited to
+16 MiB and exports to 16 MiB. The browser validator uses a strict JSON parser
+(duplicate keys, non-integer numbers, and deep nesting are rejected) and enforces the
+same rules as `adjudication-apply`, including digest, duplicate, and issue-mapping
+checks. Parity tests run both validators over the same cases. `adjudication-apply`
+still re-validates every file, so the page is a convenience, not an authority.
+
+### Inter-rater agreement
+
+```bash
+review-boundary adjudication-agreement --report run/report.json --suite run/suite.json \
+  --rater-a a.json --rater-b b.json --output agreement.json
+```
+
+Both artifacts must be complete (a decision for every recorded finding and review),
+bind to this report and suite, and cover identical digest sets. Incomplete,
+mismatched, stale, or invalid artifacts are rejected rather than aligned. The result
+reports exact agreement and Cohen's kappa for findings, reviews, and overall.
+`unknown` is an explicit third label. Only decision labels are compared; reasons are
+not, and issue mappings are counted separately for findings. Kappa is `null` when
+both raters use one identical label. This is optional evidence about the labels, not
+a semantic judge, and it is not defined for boundary reports.
 
 ## Custom suite JSON
 

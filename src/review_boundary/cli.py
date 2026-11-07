@@ -79,6 +79,35 @@ def parser():
             command.add_argument(
                 "--suite", type=Path, help="Custom evaluator-only repository suite"
             )
+    export = commands.add_parser(
+        "adjudication-export", help="Create an all-unknown repository adjudication template"
+    )
+    export.add_argument("--report", type=Path, required=True)
+    export.add_argument("--suite", type=Path, required=True, help="Original evaluator suite")
+    export.add_argument("--output", type=Path, required=True)
+    label_ui = commands.add_parser(
+        "adjudication-ui", help="Write a self-contained offline page for labeling findings"
+    )
+    label_ui.add_argument("--report", type=Path, required=True)
+    label_ui.add_argument("--suite", type=Path, required=True, help="Original evaluator suite")
+    label_ui.add_argument("--output", type=Path, required=True, help="New HTML file")
+    agreement = commands.add_parser(
+        "adjudication-agreement",
+        help="Report exact agreement and Cohen kappa for two complete adjudications",
+    )
+    agreement.add_argument("--report", type=Path, required=True)
+    agreement.add_argument("--suite", type=Path, required=True, help="Original evaluator suite")
+    agreement.add_argument("--rater-a", type=Path, required=True)
+    agreement.add_argument("--rater-b", type=Path, required=True)
+    agreement.add_argument("--output", type=Path, help="New JSON file for the full result")
+    apply = commands.add_parser(
+        "adjudication-apply", help="Apply digest-bound adjudication to a new repository report"
+    )
+    apply.add_argument("--report", type=Path, required=True)
+    apply.add_argument("--suite", type=Path, required=True, help="Original evaluator suite")
+    apply.add_argument("--adjudication", type=Path, required=True)
+    apply.add_argument("--logs", type=Path, nargs="+", required=True, help="Trusted Inspect logs")
+    apply.add_argument("--output", type=Path, required=True)
     repository_model = commands.add_parser(
         "repository-run-model", help="Run provider models in the multi-file repository contract"
     )
@@ -567,6 +596,25 @@ def main(argv=None):
                 run_repository_model(args)
                 if args.command == "repository-run-model"
                 else run_repository_command(args)
+            )
+        if args.command == "adjudication-ui":
+            from .repository_adjudication_ui import adjudication_ui_command
+
+            return adjudication_ui_command(args)
+        if args.command == "adjudication-agreement":
+            from .repository_adjudication_agreement import agreement_command
+
+            return agreement_command(args)
+        if args.command in ("adjudication-export", "adjudication-apply"):
+            from .repository_adjudication import (
+                apply_adjudication_command,
+                export_adjudication_command,
+            )
+
+            return (
+                export_adjudication_command(args)
+                if args.command == "adjudication-export"
+                else apply_adjudication_command(args)
             )
         if args.command == "dashboard":
             from .dashboard import default_report_paths, write_dashboard
