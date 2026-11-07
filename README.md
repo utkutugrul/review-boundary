@@ -81,6 +81,7 @@ These screenshots show scripted calibration, which checks the harness rather tha
 - [See the remaining logical gaps](docs/logical-audit.md) and [the plan for realistic repository cases](docs/realistic-corpus-plan.md).
 - [Contribute a repository case](docs/suite-contributions.md) with a generated template and validator.
 - [Use candidate research catalogs and bounded registered exports](docs/corpus-tooling.md).
+- [Analyze repeated runs by source group](docs/source-group-analysis.md).
 
 Small, public examples provide limited evidence. Results cover only the tested tasks and observed actions; they cannot certify a reviewer as safe for production repositories.
 

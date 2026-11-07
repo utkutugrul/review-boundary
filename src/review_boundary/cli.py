@@ -50,6 +50,11 @@ def parser():
     )
     catalog.add_argument("--input", type=Path, required=True)
     catalog.add_argument("--output", type=Path, help="New JSON summary file; default is stdout")
+    analysis = commands.add_parser(
+        "analyze-groups", help="Summarize saved native reports by source group"
+    )
+    analysis.add_argument("--plan", type=Path, required=True)
+    analysis.add_argument("--output", type=Path, required=True, help="New JSON analysis file")
     validate = commands.add_parser(
         "validate-suite", help="Validate an evaluator-only repository suite without running models"
     )
@@ -775,6 +780,10 @@ def main(argv=None):
             return export_upstream(args)
         if args.command == "candidate-catalog":
             return candidate_catalog_command(args)
+        if args.command == "analyze-groups":
+            from .source_group_analysis_io import analyze_groups_command
+
+            return analyze_groups_command(args)
         if args.command == "validate-suite":
             from .suite_validation import validate_suite_command
 
