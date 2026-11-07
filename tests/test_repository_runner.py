@@ -1,6 +1,7 @@
 import html
 import json
 import os
+from hashlib import sha256
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -401,8 +402,9 @@ def test_repository_multi_model_failure_retains_complete_cost_reservation(
     assert not (tmp_path / "model-result" / "settlement.json").exists()
 
 
+@pytest.mark.parametrize("reported_cost", [None, 0.00001], ids=["unknown-cost", "complete-cost"])
 def test_repository_model_success_uses_native_task_and_trusted_scores(
-    tmp_path, monkeypatch, repository_provider_environment
+    tmp_path, monkeypatch, repository_provider_environment, reported_cost
 ):
     monkeypatch.setenv("OPENAI_API_KEY", "synthetic-repository-key")
     original_prepare = repository_runner.prepare_provider
@@ -429,9 +431,23 @@ def test_repository_model_success_uses_native_task_and_trusted_scores(
     monkeypatch.setattr(
         repository_runner, "model_snapshot", lambda *args: pytest.fail("catalog called")
     )
-    monkeypatch.setattr(
-        repository_runner, "guarded_model", lambda *args: repository_success_model()
-    )
+    costs = []
+
+    def successful_model(*args):
+        model = repository_success_model()
+        if reported_cost is not None:
+            original_generate = model.api.generate
+
+            async def generate_with_cost(*args, **kwargs):
+                output, call = await original_generate(*args, **kwargs)
+                call.response = {**(call.response or {}), "usage": {"cost": reported_cost}}
+                costs.append(reported_cost)
+                return output, call
+
+            monkeypatch.setattr(model.api, "generate", generate_with_cost)
+        return model
+
+    monkeypatch.setattr(repository_runner, "guarded_model", successful_model)
     assert main(repository_model_argv(tmp_path, "openai")) == 0
     output = tmp_path / "model-result"
     report = json.loads((output / "report.json").read_text())
@@ -441,8 +457,28 @@ def test_repository_model_success_uses_native_task_and_trusted_scores(
     assert report["summary"]["semantically_adjudicated"] == 0
     assert manifest["provider"]["name"] == "openai" and manifest["run_finished"]
     assert manifest["reviewers"] == ["mockllm/openai/test-model"]
-    assert manifest["usage"]["api_calls_without_reported_cost"] > 0
-    assert not (output / "settlement.json").exists()
+    if reported_cost is None:
+        assert manifest["usage"]["api_calls_without_reported_cost"] > 0
+        assert not (output / "settlement.json").exists()
+    else:
+        assert costs
+        usage = manifest["usage"]
+        assert usage["api_calls_with_reported_cost"] == len(costs)
+        assert usage["api_calls_without_reported_cost"] == 0
+        assert usage["provider_reported_cost_usd"] == pytest.approx(sum(costs))
+        settlement = json.loads((output / "settlement.json").read_text())
+        ledger = json.loads((tmp_path / "model-budget.json").read_text())
+        run = ledger["runs"][0]
+        expected_proof = {
+            "report_sha256": sha256((output / "report.json").read_bytes()).hexdigest(),
+            "report_path": str((output / "report.json").resolve()),
+        }
+        assert run["id"] == manifest["run_id"]
+        assert run["reserved_usd"] == manifest["planned_reservation_usd"]
+        assert run["reserved_usd"] > run["settled_usd"]
+        assert run["settled_usd"] == usage["provider_reported_cost_usd"]
+        assert run["settlement"] == expected_proof
+        assert settlement == {"settled_usd": run["settled_usd"], **expected_proof}
     assert [
         json.loads(line) for line in (output / "events.jsonl").read_text().splitlines()
     ] == report["rows"]

@@ -1,5 +1,6 @@
 import json
 import os
+from hashlib import sha256
 from types import SimpleNamespace
 
 import pytest
@@ -208,8 +209,9 @@ def test_boundary_model_reservation_multiplies_cases_guards_models_and_epochs(
     assert json.loads(capsys.readouterr().out)["expected_count"] == 6
 
 
+@pytest.mark.parametrize("reported_cost", [None, 0.00001], ids=["unknown-cost", "complete-cost"])
 def test_boundary_model_success_uses_native_task_and_trusted_scores(
-    tmp_path, monkeypatch, provider_environment
+    tmp_path, monkeypatch, provider_environment, reported_cost
 ):
     monkeypatch.setenv("OPENAI_API_KEY", "synthetic-boundary-key")
     original_prepare = boundary_runner.prepare_provider
@@ -236,7 +238,23 @@ def test_boundary_model_success_uses_native_task_and_trusted_scores(
     monkeypatch.setattr(
         boundary_runner, "model_snapshot", lambda *args: pytest.fail("catalog called")
     )
-    monkeypatch.setattr(boundary_runner, "guarded_model", lambda *args: boundary_success_model())
+    costs = []
+
+    def successful_model(*args):
+        model = boundary_success_model()
+        if reported_cost is not None:
+            original_generate = model.api.generate
+
+            async def generate_with_cost(*args, **kwargs):
+                output, call = await original_generate(*args, **kwargs)
+                call.response = {**(call.response or {}), "usage": {"cost": reported_cost}}
+                costs.append(reported_cost)
+                return output, call
+
+            monkeypatch.setattr(model.api, "generate", generate_with_cost)
+        return model
+
+    monkeypatch.setattr(boundary_runner, "guarded_model", successful_model)
     assert main(boundary_model_argv(tmp_path, "openai")) == 0
     output = tmp_path / "boundary-result"
     report = json.loads((output / "report.json").read_text())
@@ -247,10 +265,30 @@ def test_boundary_model_success_uses_native_task_and_trusted_scores(
     assert report["comparison"]["missing_samples"] == 0
     assert manifest["reviewers"] == ["mockllm/openai/test-model"]
     assert manifest["run_finished"] is True
-    assert manifest["usage"]["api_calls_without_reported_cost"] > 0
     assert all(row["semantic_passed"] is None for row in report["rows"])
     assert len({row["input_sha256"] for row in report["rows"]}) == 1
-    assert not (output / "settlement.json").exists()
+    if reported_cost is None:
+        assert manifest["usage"]["api_calls_without_reported_cost"] > 0
+        assert not (output / "settlement.json").exists()
+    else:
+        assert costs
+        usage = manifest["usage"]
+        assert usage["api_calls_with_reported_cost"] == len(costs)
+        assert usage["api_calls_without_reported_cost"] == 0
+        assert usage["provider_reported_cost_usd"] == pytest.approx(sum(costs))
+        settlement = json.loads((output / "settlement.json").read_text())
+        ledger = json.loads((tmp_path / "boundary-budget.json").read_text())
+        run = ledger["runs"][0]
+        expected_proof = {
+            "report_sha256": sha256((output / "report.json").read_bytes()).hexdigest(),
+            "report_path": str((output / "report.json").resolve()),
+        }
+        assert run["id"] == manifest["run_id"]
+        assert run["reserved_usd"] == manifest["planned_reservation_usd"]
+        assert run["reserved_usd"] > run["settled_usd"]
+        assert run["settled_usd"] == usage["provider_reported_cost_usd"]
+        assert run["settlement"] == expected_proof
+        assert settlement == {"settled_usd": run["settled_usd"], **expected_proof}
 
 
 @pytest.mark.parametrize("provider", ["openrouter", "openai", "anthropic"])
