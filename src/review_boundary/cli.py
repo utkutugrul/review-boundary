@@ -55,6 +55,19 @@ def parser():
     )
     analysis.add_argument("--plan", type=Path, required=True)
     analysis.add_argument("--output", type=Path, required=True, help="New JSON analysis file")
+    for name, help_text in (
+        ("isolation-probe", "Check fixed local container controls with harmless probes"),
+        ("isolated-run", "Run an explicit bounded command in a fixed local container"),
+    ):
+        command = commands.add_parser(name, help=help_text)
+        command.add_argument("--config", type=Path, required=True)
+        command.add_argument("--output", type=Path, required=True, help="New JSON file")
+        command.add_argument(
+            "--dry-run", action="store_true", help="Validate only; no runtime action"
+        )
+        if name == "isolated-run":
+            command.add_argument("--job", type=Path, required=True)
+            command.add_argument("--binding", choices=("sum-echo-v1",))
     validate = commands.add_parser(
         "validate-suite", help="Validate an evaluator-only repository suite without running models"
     )
@@ -784,6 +797,14 @@ def main(argv=None):
             from .source_group_analysis_io import analyze_groups_command
 
             return analyze_groups_command(args)
+        if args.command in ("isolation-probe", "isolated-run"):
+            from .isolated_runner import isolated_run_command, isolation_probe_command
+
+            return (
+                isolation_probe_command(args)
+                if args.command == "isolation-probe"
+                else isolated_run_command(args)
+            )
         if args.command == "validate-suite":
             from .suite_validation import validate_suite_command
 

@@ -82,6 +82,7 @@ These screenshots show scripted calibration, which checks the harness rather tha
 - [Contribute a repository case](docs/suite-contributions.md) with a generated template and validator.
 - [Use candidate research catalogs and bounded registered exports](docs/corpus-tooling.md).
 - [Analyze repeated runs by source group](docs/source-group-analysis.md).
+- [Run explicit commands with fixed local container controls](docs/isolated-execution.md).
 
 Small, public examples provide limited evidence. Results cover only the tested tasks and observed actions; they cannot certify a reviewer as safe for production repositories.
 
