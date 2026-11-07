@@ -26,6 +26,8 @@ HARNESS_FILES = (
     "reconstruct.py",
     "compare.py",
     "native_compare.py",
+    "source_group_analysis.py",
+    "source_group_analysis_io.py",
     "report_validation.py",
     "report_contract.py",
     "evidence_refs.py",

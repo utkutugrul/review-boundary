@@ -152,6 +152,7 @@ class _NativeReport:
     rows: list[dict]
     expected: dict[Group, set[SampleKey]]
     suite_method: str
+    coverage_known: bool = True
 
 
 def _canonical(value: Any) -> str:
@@ -369,7 +370,9 @@ def _bind_suite(report: dict, kind: str, cases: tuple, method: str, label: str) 
     return set(digests if kind == "repository" else (case.case_id for case in cases))
 
 
-def _read_native(document: dict, kind: str, cases: tuple | None, label: str) -> _NativeReport:
+def _read_native(
+    document: dict, kind: str, cases: tuple | None, label: str, *, analysis: bool = False
+) -> _NativeReport:
     try:
         contract = detect_contract(document)
         if contract.report_kind != kind:
@@ -378,7 +381,7 @@ def _read_native(document: dict, kind: str, cases: tuple | None, label: str) -> 
     except (ValueError, TypeError, UnicodeError, OverflowError, RecursionError, KeyError):
         raise ComparisonError(f"{label} has an invalid native report document") from None
     metadata, rows = report["metadata"], report["rows"]
-    if metadata.get("run_finished") is False:
+    if metadata.get("run_finished") is False and not analysis:
         raise ComparisonError(
             f"{label} run is explicitly unfinished; execution cannot establish a gate"
         )
@@ -451,35 +454,46 @@ def _read_native(document: dict, kind: str, cases: tuple | None, label: str) -> 
     )
     bound_cases = _bind_suite(report, kind, cases, method, label) if cases is not None else None
     slots = metadata.get("expected_slots")
+    coverage_known = slots is not None or bound_cases is not None
     if slots is None:
         if bound_cases is None:
-            raise ComparisonError(
-                f"{label} expected-slot coverage is unknown; supply a bound expected_suite"
-            )
-        slots = [
-            {
-                "case_sha256" if kind == "repository" else "case_id": case,
-                "reviewer": reviewer,
-                "epoch": epoch,
-                **({"guard": guard} if kind == "boundary" else {}),
-            }
-            for reviewer in reviewers
-            for guard in guards
-            for case in bound_cases
-            for epoch in range(1, epochs + 1)
-        ]
+            if not analysis:
+                raise ComparisonError(
+                    f"{label} expected-slot coverage is unknown; supply a bound expected_suite"
+                )
+            slots = []
+        else:
+            slots = [
+                {
+                    "case_sha256" if kind == "repository" else "case_id": case,
+                    "reviewer": reviewer,
+                    "epoch": epoch,
+                    **({"guard": guard} if kind == "boundary" else {}),
+                }
+                for reviewer in reviewers
+                for guard in guards
+                for case in bound_cases
+                for epoch in range(1, epochs + 1)
+            ]
     case_keys = {slot["case_sha256"] if kind == "repository" else slot["case_id"] for slot in slots}
-    if not case_keys or (bound_cases is not None and case_keys != bound_cases):
+    if coverage_known and (not case_keys or (bound_cases is not None and case_keys != bound_cases)):
         raise ComparisonError(f"{label} declared cases do not match the expected suite")
     if kind == "boundary" and "policy_sha256" in metadata:
         policies = metadata["policy_sha256"]
-        if type(policies) is not dict or set(policies) != case_keys:
+        if type(policies) is not dict or (
+            set(policies) != case_keys
+            if coverage_known
+            else len(policies) != metadata["case_count"]
+        ):
             raise ComparisonError(
                 f"{label} declared boundary policies do not cover the case manifest"
             )
         for fingerprint in policies.values():
             _hash(fingerprint, f"{label} boundary policy")
-        if any(row["policy_sha256"] != policies[row["case_id"]] for row in rows):
+        if any(
+            row["case_id"] not in policies or row["policy_sha256"] != policies[row["case_id"]]
+            for row in rows
+        ):
             raise ComparisonError(f"{label} boundary row policy disagrees with its declared run")
     expected = {
         (reviewer,) if kind == "repository" else (reviewer, guard): {
@@ -488,10 +502,15 @@ def _read_native(document: dict, kind: str, cases: tuple | None, label: str) -> 
         for reviewer in reviewers
         for guard in guards
     }
+    if not coverage_known and (
+        len(rows) > declared_total
+        or len({_key(row, kind)[0] for row in rows}) > metadata["case_count"]
+    ):
+        raise ComparisonError(f"{label} observed rows exceed the declared coverage bound")
     total = len(case_keys) * len(reviewers) * len(guards) * epochs
     declared = {(_group(slot, kind), _key(slot, kind)) for slot in slots}
     complete = {(group, key) for group, keys in expected.items() for key in keys}
-    if (
+    if coverage_known and (
         total > MAX_ROWS
         or metadata["expected_count"] != total
         or metadata["case_count"] != len(case_keys)
@@ -511,7 +530,9 @@ def _read_native(document: dict, kind: str, cases: tuple | None, label: str) -> 
         else ()
     )
     for row in rows:
-        if _group(row, kind) not in expected or _key(row, kind) not in expected[_group(row, kind)]:
+        if _group(row, kind) not in expected or (
+            coverage_known and _key(row, kind) not in expected[_group(row, kind)]
+        ):
             raise ComparisonError(f"{label} contains an undeclared native sample")
         if row["scoring_version"] != metadata["scoring_version"]:
             raise ComparisonError(f"{label} scoring identity is inconsistent")
@@ -539,7 +560,20 @@ def _read_native(document: dict, kind: str, cases: tuple | None, label: str) -> 
                 f"{label} repeats a case name with different immutable case digests"
             )
         seen_cases[digest], seen_names[name] = identity, digest
-    return _NativeReport(kind, metadata, rows, expected, method)
+    return _NativeReport(kind, metadata, rows, expected, method, coverage_known)
+
+
+def native_analysis_view(document: dict, *, expected_suite=None) -> _NativeReport:
+    """Reuse native binding checks while retaining valid failed/incomplete observations.
+
+    Empty expected sets with coverage_known=False are unknown coverage, never an
+    observed-row-derived manifest. Public comparison entry points stay strict.
+    """
+    kind = detect_contract(document).report_kind
+    if kind not in ("repository", "boundary"):
+        raise ComparisonError("Source-group analysis requires a native report")
+    cases = _suite_cases(expected_suite, kind)
+    return _read_native(document, kind, cases, "analysis", analysis=True)
 
 
 def _input_fingerprint(metadata: dict, row: dict) -> str | None:
@@ -717,20 +751,32 @@ def _descriptive(report: _NativeReport, rows: dict, expected: int) -> dict:
     }
 
 
-def _compare(
-    baseline,
-    candidate,
+def _check_paired_identity(old, new, before_meta, after_meta, kind, cases):
+    identity_fields = CASE_FIELDS + (BOUNDARY_CASE_FIELDS if kind == "boundary" else ())
+    if any(old[field] != new[field] for field in identity_fields) or old.get(
+        "input_sha256"
+    ) != new.get("input_sha256"):
+        raise ComparisonError(
+            "Paired sample case, input, scoring or policy identity is incompatible"
+        )
+    if cases is None and _input_fingerprint(before_meta, old) != _input_fingerprint(
+        after_meta, new
+    ):
+        raise ComparisonError("Paired sample recorded input fingerprints are incompatible")
+
+
+def _pair_controls(
+    before_report,
+    after_report,
     *,
-    kind,
+    cases,
     baseline_reviewer,
     candidate_reviewer,
     baseline_guard=None,
     candidate_guard=None,
-    expected_suite=None,
 ):
-    cases = _suite_cases(expected_suite, kind)
-    before_report = _read_native(baseline, kind, cases, "baseline")
-    after_report = _read_native(candidate, kind, cases, "candidate")
+    """Shared immutable experiment and explicit-selector checks, without outcome gates."""
+    kind = before_report.kind
     before_meta, after_meta = before_report.metadata, after_report.metadata
     for field in COMPATIBLE_METADATA:
         if (field in before_meta) != (field in after_meta) or _canonical(
@@ -778,9 +824,50 @@ def _compare(
             raise ComparisonError(
                 f"Changed {field} requires explicit baseline_{field} and candidate_{field} selectors"
             )
+    return before_group, after_group, before, after, baseline_transport_inapplicable
+
+
+def _compare(
+    baseline,
+    candidate,
+    *,
+    kind,
+    baseline_reviewer,
+    candidate_reviewer,
+    baseline_guard=None,
+    candidate_guard=None,
+    expected_suite=None,
+    _analysis=False,
+):
+    cases = _suite_cases(expected_suite, kind)
+    before_report = _read_native(baseline, kind, cases, "baseline", analysis=_analysis)
+    after_report = _read_native(candidate, kind, cases, "candidate", analysis=_analysis)
+    before_meta, after_meta = before_report.metadata, after_report.metadata
+    before_group, after_group, before, after, baseline_transport_inapplicable = _pair_controls(
+        before_report,
+        after_report,
+        cases=cases,
+        baseline_reviewer=baseline_reviewer,
+        candidate_reviewer=candidate_reviewer,
+        baseline_guard=baseline_guard,
+        candidate_guard=candidate_guard,
+    )
     expected = before_report.expected[before_group]
+    if _analysis and (not before_report.coverage_known or not after_report.coverage_known):
+        raise ComparisonError("Pairing requires declared or suite-bound expected coverage")
     if expected != after_report.expected[after_group]:
         raise ComparisonError("Incompatible expected sample coverage or epoch identities")
+    if _analysis:
+        for key in sorted(set(before) & set(after)):
+            _check_paired_identity(before[key], after[key], before_meta, after_meta, kind, cases)
+        return {
+            "baseline_group": before_group,
+            "candidate_group": after_group,
+            "baseline_rows": before,
+            "candidate_rows": after,
+            "expected": expected,
+            "kind": kind,
+        }
     if set(before) != expected:
         raise ComparisonError("Baseline coverage is incomplete for the declared selected group")
     if not any(row["conclusive"] for row in before.values()):
@@ -792,7 +879,6 @@ def _compare(
     nullable = ("exact_source_citation_evidence", "semantic_passed") + (
         ("agent_resisted",) if kind == "boundary" else ()
     )
-    identity_fields = CASE_FIELDS + (BOUNDARY_CASE_FIELDS if kind == "boundary" else ())
     before_prompts, after_prompts = _prompt_map(before_meta), _prompt_map(after_meta)
     prompt_maps_conflict = (
         before_prompts is not None and after_prompts is not None and before_prompts != after_prompts
@@ -828,16 +914,7 @@ def _compare(
                 )
             )
             continue
-        if any(old[field] != new[field] for field in identity_fields) or old.get(
-            "input_sha256"
-        ) != new.get("input_sha256"):
-            raise ComparisonError(
-                "Paired sample case, input, scoring or policy identity is incompatible"
-            )
-        if cases is None and _input_fingerprint(before_meta, old) != _input_fingerprint(
-            after_meta, new
-        ):
-            raise ComparisonError("Paired sample recorded input fingerprints are incompatible")
+        _check_paired_identity(old, new, before_meta, after_meta, kind, cases)
         a, b = _metrics(old, kind), _metrics(new, kind)
         losses, gains, availability, descriptive = [], [], [], []
         for field in positives:
@@ -1056,6 +1133,33 @@ def compare_repository_reports(
         baseline_reviewer=baseline_reviewer,
         candidate_reviewer=candidate_reviewer,
         expected_suite=expected_suite,
+    )
+
+
+def native_analysis_pair(
+    baseline,
+    candidate,
+    *,
+    baseline_reviewer,
+    candidate_reviewer,
+    baseline_guard=None,
+    candidate_guard=None,
+    expected_suite=None,
+):
+    """Check identical pairing controls without treating partial data as a CI gate."""
+    kind = detect_contract(baseline).report_kind
+    if kind not in ("repository", "boundary") or detect_contract(candidate).report_kind != kind:
+        raise ComparisonError("Analysis pairing requires identical native report kinds")
+    return _compare(
+        baseline,
+        candidate,
+        kind=kind,
+        baseline_reviewer=baseline_reviewer,
+        candidate_reviewer=candidate_reviewer,
+        baseline_guard=baseline_guard,
+        candidate_guard=candidate_guard,
+        expected_suite=expected_suite,
+        _analysis=True,
     )
 
 
