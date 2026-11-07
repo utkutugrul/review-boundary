@@ -41,7 +41,7 @@ import jsonschema
 from pydantic import Field, ValidationError, field_validator
 
 from .corpus_manifest import CorpusManifest, parse_corpus_manifest
-from .corpus_registry import corpus_names, get_corpus
+from .corpus_registry import checked_registered_cases, corpus_names, get_corpus
 from .json_input import read_json_object
 from .provenance import HARNESS_FILES, json_digest
 from .repository_cases import FrozenModel, case_digest
@@ -441,8 +441,14 @@ def _load_manifests(paths: tuple):
 def _bind_registry(name: str, suite) -> _Binding:
     registration = get_corpus(name)
     try:
-        cases = registration.build_cases()
+        cases = checked_registered_cases(registration)
         inventory = parse_corpus_manifest(registration.evaluator_manifest()["inventory"])
+        if (
+            inventory.corpus_name != registration.name
+            or inventory.corpus_version != registration.corpus_version
+            or inventory.scoring_version != registration.scoring_version
+        ):
+            raise ValueError("Registered evaluator inventory identity does not match")
     except (ValueError, OSError, KeyError, TypeError):
         return _Binding(
             registration,
@@ -565,6 +571,11 @@ def _check_provenance(layer, suite, external, failures, binding, covering) -> No
 
 
 def _run_behavior(layer: _Layer, registration):
+    if registration.suite_schema_version != 1:
+        layer.fail(
+            "Version 2 registered suites do not have a reviewed behavior verification binding."
+        )
+        return {"reproduced": False}
     try:
         result = registration.verify_behavior()
     except Exception:  # noqa: BLE001

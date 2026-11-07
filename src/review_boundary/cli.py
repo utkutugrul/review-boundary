@@ -40,6 +40,16 @@ def parser():
     corpus.add_argument("--corpus", choices=corpus_names(), required=True)
     corpus.add_argument("--output", type=Path, required=True)
     corpus.add_argument("--verify", action="store_true", help="Run offline behavior checks")
+    corpus.add_argument(
+        "--shard",
+        action="store_true",
+        help="Export bounded suites while keeping source groups whole",
+    )
+    catalog = commands.add_parser(
+        "candidate-catalog", help="Validate and summarize local candidate research metadata"
+    )
+    catalog.add_argument("--input", type=Path, required=True)
+    catalog.add_argument("--output", type=Path, help="New JSON summary file; default is stdout")
     validate = commands.add_parser(
         "validate-suite", help="Validate an evaluator-only repository suite without running models"
     )
@@ -727,6 +737,28 @@ def payload_command(args) -> int:
     return 0
 
 
+def candidate_catalog_command(args) -> int:
+    """Summarize bounded local metadata without granting it execution or admission authority."""
+    from .corpus_candidates import candidate_catalog_summary, load_candidate_catalog
+    from .repository_adjudication import write_new_text
+
+    try:
+        summary = candidate_catalog_summary(load_candidate_catalog(args.input))
+        text = json.dumps(summary, indent=2, ensure_ascii=False) + "\n"
+        if args.output is None:
+            print(text, end="")
+        else:
+            write_new_text(args.output, text, "candidate catalog summary")
+    except (OSError, ValueError, TypeError, RecursionError):
+        # Neither parser diagnostics nor filesystem errors may echo catalog content.
+        print(
+            "Candidate catalog refused: expected bounded local metadata and a new JSON output.",
+            file=sys.stderr,
+        )
+        return 2
+    return 0
+
+
 def main(argv=None):
     args = parser().parse_args(argv)
     try:
@@ -741,6 +773,8 @@ def main(argv=None):
             from .upstream_runner import export_upstream
 
             return export_upstream(args)
+        if args.command == "candidate-catalog":
+            return candidate_catalog_command(args)
         if args.command == "validate-suite":
             from .suite_validation import validate_suite_command
 
