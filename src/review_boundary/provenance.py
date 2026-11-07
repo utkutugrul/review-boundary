@@ -18,6 +18,7 @@ class ProvenanceError(ValueError):
 SCHEMA_VERSION = 1
 MAX_SOURCE_BYTES = 4 * 1024 * 1024
 MAX_TOTAL_SOURCE_BYTES = 16 * 1024 * 1024
+MAX_HARNESS_FILES = 128
 _HASH = re.compile(r"[0-9a-f]{64}")
 HARNESS_FILES = (
     "cli.py",
@@ -32,11 +33,16 @@ HARNESS_FILES = (
     "cases.py",
     "corpus_typescript.py",
     "corpus_rust.py",
+    "corpus_manifest.py",
+    "corpus_registry.py",
+    "suite_contribution.py",
     "adapter.py",
     "model_safety.py",
     "providers.py",
     "provenance.py",
     "repository_cases.py",
+    "repository_suite.py",
+    "suite_validation.py",
     "repository_world.py",
     "repository_runner.py",
     "repository_task.py",
@@ -85,10 +91,16 @@ def source_path(value: str) -> str:
 
 def source_fingerprint(base_dir: Path, paths: list[str] | tuple[str, ...]) -> dict:
     """Hash only explicit regular source files, without storing contents or host paths."""
+    return _source_fingerprint(base_dir, paths, maximum_files=32)
+
+
+def _source_fingerprint(
+    base_dir: Path, paths: list[str] | tuple[str, ...], *, maximum_files: int
+) -> dict:
     if not paths:
         return {"status": "not_recorded", "sha256": None, "files": {}}
-    if len(paths) > 32 or len(set(paths)) != len(paths):
-        raise ProvenanceError("Declare at most 32 distinct reviewer source files")
+    if len(paths) > maximum_files or len(set(paths)) != len(paths):
+        raise ProvenanceError(f"Declare at most {maximum_files} distinct source files")
     base = base_dir.resolve(strict=True)
     files = {}
     total = 0
@@ -131,7 +143,9 @@ def experiment_provenance(
         "hash_algorithm": "sha256",
         "prompts": {name: text_digest(text) for name, text in prompts.items()},
         "tools": {"protocol": protocol, "sha256": json_digest(tools)},
-        "harness": source_fingerprint(Path(__file__).parent, harness_files),
+        "harness": _source_fingerprint(
+            Path(__file__).parent, harness_files, maximum_files=MAX_HARNESS_FILES
+        ),
         "reviewer_source": reviewer_source or source_fingerprint(Path.cwd(), ()),
         "scope": "Caller instructions, advertised tool schemas and declared local source files only",
     }
@@ -168,7 +182,8 @@ def validate_provenance(value: Any) -> None:
             if source.get("sha256") is not None or source["files"]:
                 raise ProvenanceError("Unknown source provenance must not claim a fingerprint")
             continue
-        if source.get("status") != "recorded" or not 1 <= len(source["files"]) <= 32:
+        maximum_files = MAX_HARNESS_FILES if name == "harness" else 32
+        if source.get("status") != "recorded" or not 1 <= len(source["files"]) <= maximum_files:
             raise ProvenanceError("Invalid provenance source status")
         for path, digest in source["files"].items():
             source_path(path)

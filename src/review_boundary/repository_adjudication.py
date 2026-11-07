@@ -508,6 +508,12 @@ def observations_from_logs(
 
 def write_new_text(path, text: str, label: str) -> Path:
     """Create a new regular file without following symlinks or replacing anything."""
+    output, _ = _write_new_text_owned(path, text, label)
+    return output
+
+
+def _write_new_text_owned(path, text: str, label: str) -> tuple[Path, tuple[int, int]]:
+    """Return the created descriptor's device/inode identity for transactional cleanup."""
     from .repository_runner import _path_without_symlinks
 
     output = _path_without_symlinks(Path(path), label)
@@ -569,7 +575,7 @@ def write_new_text(path, text: str, label: str) -> Path:
             except OSError:
                 pass
         raise
-    return output
+    return output, (identity.st_dev, identity.st_ino)
 
 
 def _read_logs(paths: Sequence) -> list:

@@ -198,3 +198,18 @@ def test_native_task_records_actual_selected_instructions_and_tool_schemas():
     assert value["tools"] == {"protocol": "inspect", "sha256": json_digest(native_tool_schemas())}
     assert value["harness"]["status"] == "recorded"
     assert value["reviewer_source"]["status"] == "not_recorded"
+
+
+def test_expanded_harness_inventory_does_not_expand_reviewer_source_limit():
+    value = recorded_inputs()
+    files = {f"module_{index}.py": text_digest(str(index)) for index in range(33)}
+    record = {"status": "recorded", "sha256": json_digest(files), "files": files}
+    value["harness"] = record
+    validate_provenance(value)
+    value["reviewer_source"] = record
+    with pytest.raises(ValueError, match="source status"):
+        validate_provenance(value)
+    files = {f"module_{index}.py": text_digest(str(index)) for index in range(129)}
+    value["harness"] = {"status": "recorded", "sha256": json_digest(files), "files": files}
+    with pytest.raises(ValueError, match="source status"):
+        validate_provenance(value)
