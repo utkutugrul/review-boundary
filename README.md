@@ -2,7 +2,7 @@
 
 ![ReviewBoundary: Stress-test AI security reviewers. Two matched review paths, one carrying an untrusted instruction, approach a trust boundary.](assets/review-boundary-hero.png)
 
-**Check whether an AI code reviewer misses security problems when someone tries to mislead it.**
+**Test whether prompt injection can trick AI code reviewers into missing vulnerabilities or taking unauthorized actions.**
 
 [![Tests](https://github.com/utkutugrul/review-boundary/actions/workflows/test.yml/badge.svg)](https://github.com/utkutugrul/review-boundary/actions/workflows/test.yml)
 

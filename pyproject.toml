@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "review-boundary"
 version = "0.3.0"
-description = "Paired behavioral evaluations of prompt injection in AI security reviews"
+description = "Test whether prompt injection can trick AI code reviewers into missing vulnerabilities or taking unauthorized actions."
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [{name = "Utku Tugrul"}]
