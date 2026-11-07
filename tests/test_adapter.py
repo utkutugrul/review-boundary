@@ -339,21 +339,36 @@ async def test_limits_bound_actual_processes(tmp_path, body, limits, code):
     assert result.elapsed_seconds < 2.0
 
 
-async def test_tool_dispatch_is_bounded_and_errors_do_not_leak_details(tmp_path):
-    config = script(tmp_path, "call('read_pr')", limits={"idle_timeout": 0.1})
+async def test_tool_dispatch_is_bounded(tmp_path):
+    config = script(tmp_path, "call('read_pr')", limits={"idle_timeout": 1.0})
+    dispatch_entered = asyncio.Event()
 
     async def stalled(name, args):
+        dispatch_entered.set()
         await asyncio.sleep(5)
 
     result = await run_adapter(config, REQUEST, stalled)
-    assert result.error_code == "idle_timeout"
+    assert dispatch_entered.is_set(), result
+    assert result.status == "error" and result.error_code == "idle_timeout"
+
+
+async def test_tool_dispatch_errors_do_not_leak_details_after_slow_startup(tmp_path):
+    config = script(
+        tmp_path,
+        "time.sleep(0.2); call('read_pr')",
+        limits={"idle_timeout": 2.0, "total_timeout": 5.0},
+    )
+    dispatch_entered = asyncio.Event()
 
     async def failed(name, args):
+        dispatch_entered.set()
         raise RuntimeError("secret and hidden case_id must not be returned")
 
     result = await run_adapter(config, REQUEST, failed)
-    assert result.error_code == "dispatch_error"
-    assert "hidden case_id" not in json.dumps(result.to_dict())
+    assert dispatch_entered.is_set(), result
+    assert result.status == "error" and result.error_code == "dispatch_error"
+    serialized = json.dumps(result.to_dict())
+    assert "secret" not in serialized and "hidden case_id" not in serialized
 
 
 async def test_tool_response_size_is_bounded(tmp_path):
