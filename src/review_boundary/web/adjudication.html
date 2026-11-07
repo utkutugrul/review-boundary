@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src __ADJUDICATION_SCRIPT_HASH__; style-src __ADJUDICATION_STYLE_HASH__; img-src 'none'; connect-src 'none'; font-src 'none'; media-src 'none'; object-src 'none'; frame-src 'none'; worker-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>ReviewBoundary | Repository adjudication</title>
+  <style>/*__ADJUDICATION_CSS__*/</style>
+</head>
+<body>
+  <header class="top">
+    <div>
+      <p class="eyebrow">REVIEWBOUNDARY / LOCAL ADJUDICATION</p>
+      <h1>Label repository findings</h1>
+      <p class="lede">Every item starts as <strong>unknown</strong>. Nothing here is judged for you, and unknown is never counted as a pass or a failure. Only the decision, an optional issue mapping and the reason can be edited.</p>
+    </div>
+    <div class="actions">
+      <button type="button" id="import-button">Import labels</button>
+      <button type="button" id="reset-button">Reset all to unknown</button>
+      <button type="button" id="export-button" class="primary">Export artifact</button>
+    </div>
+  </header>
+  <section class="summary" aria-label="Progress">
+    <p id="report-line" class="mono"></p>
+    <p id="progress-line"></p>
+    <p id="status-line" role="status" aria-live="polite"></p>
+  </section>
+  <section class="toolbar" aria-label="Filters">
+    <div class="tabs" role="group" aria-label="Item type">
+      <button type="button" data-kind="findings" aria-pressed="true">Findings <span id="finding-count"></span></button>
+      <button type="button" data-kind="reviews" aria-pressed="false">Whole reviews <span id="review-count"></span></button>
+    </div>
+    <label>Case <select id="case-filter"></select></label>
+    <label>Status <select id="status-filter"><option value="all">All</option><option value="unknown">Unknown</option><option value="judged">Judged</option></select></label>
+  </section>
+  <main id="items" tabindex="-1"></main>
+  <nav class="pager" aria-label="Pages"><button type="button" id="prev-page">Previous</button><span id="page-line"></span><button type="button" id="next-page">Next</button></nav>
+  <p class="foot">Reports, findings and labels stay in this page. Exporting downloads a new file and never changes the source report. Apply it with <code>review-boundary adjudication-apply</code>.</p>
+  <input id="file-input" type="file" accept="application/json,.json" hidden aria-label="Import adjudication artifact JSON">
+  <noscript><p class="noscript">Enable JavaScript to label findings. No network connection is used.</p></noscript>
+  <!--__ADJUDICATION_DATA__-->
+  <script>/*__ADJUDICATION_JS__*/</script>
+</body>
+</html>
