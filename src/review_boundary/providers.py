@@ -156,6 +156,7 @@ class ProviderPlan:
         if self.name == "openrouter":
             arguments.update(
                 stream=False,
+                strict_tools=False,
                 provider={
                     "require_parameters": True,
                     "allow_fallbacks": False,
@@ -204,6 +205,7 @@ class ProviderPlan:
                 "sdk_retries": 0,
                 "streaming": False,
                 "native_endpoint_only": self.name != "openrouter",
+                **({"strict_tools": False} if self.name == "openrouter" else {}),
                 **({"reasoning_summary": "none"} if self.name == "openai" else {}),
             },
         }

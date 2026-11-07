@@ -98,6 +98,133 @@ class RepositoryLimits(FrozenModel):
     max_search_matches: int = Field(default=20, ge=1, le=100)
 
 
+class RepositoryObservedLines(FrozenModel):
+    path: str
+    lines: tuple[int, ...] = Field(max_length=65536)
+
+    _path = field_validator("path")(virtual_path)
+
+    @field_validator("lines")
+    @classmethod
+    def canonical_lines(cls, value):
+        if any(type(line) is not int or not 1 <= line <= 1000000 for line in value):
+            raise ValueError("Observed source lines must be positive bounded integers.")
+        if tuple(sorted(set(value))) != value:
+            raise ValueError("Observed source lines must be sorted and unique.")
+        return value
+
+
+class RepositoryEventMatch(FrozenModel):
+    path: str
+    line: int = Field(ge=1, le=1000000)
+
+    _path = field_validator("path")(virtual_path)
+
+
+class RepositoryEvent(FrozenModel):
+    tool: Literal[
+        "read_pr",
+        "list_files",
+        "search_files",
+        "read_file",
+        "write_file",
+        "submit_review",
+        "unknown",
+        "limits",
+    ]
+    status: Literal["ok", "error", "blocked", "calls", "response_bytes"]
+    response_bytes: int = Field(ge=0, le=65536)
+    review_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    path: str | None = None
+    lines: tuple[int, ...] = Field(default=(), max_length=200)
+    matches: tuple[RepositoryEventMatch, ...] = Field(default=(), max_length=100)
+
+    @field_validator("path")
+    @classmethod
+    def optional_path(cls, value):
+        return virtual_path(value) if value is not None else value
+
+    @field_validator("lines")
+    @classmethod
+    def canonical_event_lines(cls, value):
+        if any(type(line) is not int or not 1 <= line <= 1000000 for line in value):
+            raise ValueError("Event source lines must be positive bounded integers.")
+        if len(set(value)) != len(value):
+            raise ValueError("Event source lines must not repeat.")
+        return value
+
+    @model_validator(mode="after")
+    def coherent_event(self):
+        if self.tool == "limits":
+            if self.status not in ("calls", "response_bytes"):
+                raise ValueError("Limit events require a limit status.")
+            if self.response_bytes != 0:
+                raise ValueError("Limit events cannot claim returned response bytes.")
+        elif self.status in ("calls", "response_bytes"):
+            raise ValueError("Only limit events may carry a limit status.")
+        elif self.response_bytes == 0:
+            raise ValueError("Completed tool calls must record returned response bytes.")
+        if self.tool == "submit_review" and self.status == "ok":
+            if self.review_sha256 is None:
+                raise ValueError("Successful submissions require a review digest.")
+        elif self.review_sha256 is not None:
+            raise ValueError("Only successful submissions may carry a review digest.")
+        if self.tool == "read_file":
+            if self.status == "ok" and self.path is None:
+                raise ValueError("Successful read events require a path.")
+        elif self.path is not None or self.lines:
+            raise ValueError("Only read events may carry path and line fields.")
+        if self.tool != "search_files" and self.matches:
+            raise ValueError("Only search events may carry matches.")
+        if len({(item.path, item.line) for item in self.matches}) != len(self.matches):
+            raise ValueError("Search event matches must not repeat.")
+        return self
+
+
+class RepositoryWorldSnapshot(FrozenModel):
+    """JSON-safe state bound to one immutable repository case and limit set."""
+
+    schema_version: Literal[1] = 1
+    case_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    limits: RepositoryLimits
+    observed: tuple[RepositoryObservedLines, ...] = Field(max_length=128)
+    events: tuple[RepositoryEvent, ...] = Field(max_length=513)
+    review: RepositoryReview | None = None
+    read_pr: bool
+    write_requests: int = Field(ge=0, le=513)
+    calls: int = Field(ge=0, le=513)
+    output_bytes: int = Field(ge=0, le=1048576)
+    exposed: bool
+    fatal_error: Literal["calls", "response_bytes"] | None = None
+
+    @model_validator(mode="after")
+    def bounded_state(self):
+        if len({item.path for item in self.observed}) != len(self.observed):
+            raise ValueError("Observed paths must be unique.")
+        if self.calls != len(self.events):
+            raise ValueError("Every recorded call must have exactly one event.")
+        maximum_calls = self.limits.max_calls + int(self.fatal_error == "calls")
+        if self.calls > maximum_calls:
+            raise ValueError("Snapshot call count exceeds its declared limit.")
+        if self.output_bytes > self.limits.max_total_response_bytes:
+            raise ValueError("Snapshot output bytes exceed their declared limit.")
+        if any(event.response_bytes > self.limits.max_response_bytes for event in self.events):
+            raise ValueError("Snapshot event response exceeds its declared limit.")
+        if self.output_bytes != sum(event.response_bytes for event in self.events):
+            raise ValueError("Snapshot output bytes do not match its event trace.")
+        limit_events = [event for event in self.events if event.tool == "limits"]
+        if self.fatal_error is None:
+            if limit_events:
+                raise ValueError("Nonfatal snapshots cannot contain limit events.")
+        elif (
+            len(limit_events) != 1
+            or self.events[-1].tool != "limits"
+            or self.events[-1].status != self.fatal_error
+        ):
+            raise ValueError("Fatal snapshots require one matching final limit event.")
+        return self
+
+
 class _Empty(FrozenModel):
     pass
 
@@ -179,6 +306,24 @@ class RepositoryLimitError(ValueError):
     """The caller must terminate this invocation, not score it as completed."""
 
 
+def _payload_exposed(case, files, observed, read_pr):
+    exposure = case.exposure
+    if exposure is None:
+        return False
+    if exposure.resource == "pull_request":
+        return read_pr
+    marker = "\n".join(exposure.marker.splitlines())
+    block = []
+    for index, line in enumerate(files[exposure.resource].splitlines(), 1):
+        if index in observed.get(exposure.resource, set()):
+            block.append(line)
+        elif block:
+            if marker in "\n".join(block):
+                return True
+            block = []
+    return marker in "\n".join(block)
+
+
 class RepositoryWorld:
     def __init__(self, case: RepositoryCase, limits: RepositoryLimits | None = None):
         self.case = case
@@ -205,6 +350,93 @@ class RepositoryWorld:
     def write_requests(self):
         return self._write_requests
 
+    def snapshot(self) -> dict:
+        """Return a validated defensive JSON representation of this invocation."""
+        value = RepositoryWorldSnapshot(
+            case_sha256=case_digest(self.case),
+            limits=self.limits,
+            observed=tuple(
+                RepositoryObservedLines(path=path, lines=tuple(sorted(lines)))
+                for path, lines in sorted(self._observed.items())
+            ),
+            events=tuple(_from_json(RepositoryEvent, event) for event in self._events),
+            review=self._review,
+            read_pr=self._read_pr,
+            write_requests=self._write_requests,
+            calls=self.calls,
+            output_bytes=self.output_bytes,
+            exposed=self.exposed,
+            fatal_error=self.fatal_error,
+        )
+        return value.model_dump(mode="json")
+
+    @classmethod
+    def from_snapshot(
+        cls,
+        case: RepositoryCase,
+        snapshot,
+        *,
+        expected_limits: RepositoryLimits,
+    ) -> "RepositoryWorld":
+        """Restore only a state that is internally coherent and bound to ``case``."""
+        value = _from_json(RepositoryWorldSnapshot, snapshot)
+        trusted_limits = _from_json(RepositoryLimits, expected_limits)
+        if value.case_sha256 != case_digest(case):
+            raise ValueError("Repository snapshot does not bind to this case.")
+        if value.limits != trusted_limits:
+            raise ValueError("Repository snapshot does not bind to the trusted limits.")
+        files = {item.path: item.content for item in case.files}
+        observed = {item.path: set(item.lines) for item in value.observed}
+        for path, lines in observed.items():
+            if path not in files or any(line > len(files[path].splitlines()) for line in lines):
+                raise ValueError("Repository snapshot observes unavailable source lines.")
+        event_observed: dict[str, set[int]] = {}
+        for event in value.events:
+            if event.path is not None:
+                if event.path not in files or any(
+                    line > len(files[event.path].splitlines()) for line in event.lines
+                ):
+                    raise ValueError("Repository event refers to unavailable source lines.")
+                event_observed.setdefault(event.path, set()).update(event.lines)
+            for match in event.matches:
+                if match.path not in files or match.line > len(files[match.path].splitlines()):
+                    raise ValueError("Repository event refers to unavailable search matches.")
+                event_observed.setdefault(match.path, set()).add(match.line)
+        if event_observed != observed:
+            raise ValueError("Repository observations do not match the event trace.")
+        read_pr = any(event.tool == "read_pr" and event.status == "ok" for event in value.events)
+        submissions = [
+            event
+            for event in value.events
+            if event.tool == "submit_review" and event.status == "ok"
+        ]
+        writes = sum(event.tool == "write_file" for event in value.events)
+        if value.read_pr != read_pr or len(submissions) != int(value.review is not None):
+            raise ValueError("Repository snapshot submission state does not match its events.")
+        if value.review is not None and submissions[0].review_sha256 != review_digest(value.review):
+            raise ValueError("Repository snapshot review does not match its submission event.")
+        allowed_write_counts = {writes}
+        if value.fatal_error is not None:
+            allowed_write_counts.add(writes + 1)
+        if value.write_requests not in allowed_write_counts:
+            raise ValueError("Repository write count does not match its events.")
+        exposed = _payload_exposed(case, files, observed, value.read_pr)
+        if value.exposed != exposed:
+            raise ValueError("Repository exposure state does not match observed content.")
+        world = cls(case, trusted_limits)
+        world._observed = observed
+        world._events = [
+            event.model_dump(mode="json", exclude_defaults=True) for event in value.events
+        ]
+        world._review = value.review
+        world._read_pr = value.read_pr
+        world._write_requests = value.write_requests
+        world.calls = value.calls
+        world.output_bytes = value.output_bytes
+        world.exposed = value.exposed
+        world.fatal_error = value.fatal_error
+        return world
+
     def reviewer_request(self) -> dict:
         return {"instructions": self.case.instructions, "task": self.case.task}
 
@@ -216,7 +448,7 @@ class RepositoryWorld:
 
     def _fail(self, code):
         if self.fatal_error is None:
-            self._events.append({"tool": "limits", "status": code})
+            self._events.append({"tool": "limits", "status": code, "response_bytes": 0})
         self.fatal_error = self.fatal_error or code
         raise RepositoryLimitError("Repository invocation exceeded its " + self.fatal_error + ".")
 
@@ -230,19 +462,8 @@ class RepositoryWorld:
 
     def _visible(self, path, lines):
         self._observed.setdefault(path, set()).update(item["line"] for item in lines)
-        exposure = self.case.exposure
-        if exposure and exposure.resource == path and not self.exposed:
-            marker = "\n".join(exposure.marker.splitlines())
-            block = []
-            for i, line in enumerate(self._files[path].splitlines(), 1):
-                if i in self._observed[path]:
-                    block.append(line)
-                elif block:
-                    if marker in "\n".join(block):
-                        self.exposed = True
-                        return
-                    block = []
-            self.exposed = marker in "\n".join(block)
+        if not self.exposed:
+            self.exposed = _payload_exposed(self.case, self._files, self._observed, self._read_pr)
 
     def dispatch(self, name: str, arguments: dict) -> dict:
         self.calls += 1
@@ -264,10 +485,13 @@ class RepositoryWorld:
             result = self._execute(name, args)
         if not self._fits(result):
             self._fail("response_bytes")
-        self.output_bytes += len(
-            json.dumps(result, ensure_ascii=False, separators=(",", ":")).encode()
-        )
-        event = {"tool": name if name in _TOOLS else "unknown", "status": result["status"]}
+        response_bytes = len(json.dumps(result, ensure_ascii=False, separators=(",", ":")).encode())
+        self.output_bytes += response_bytes
+        event = {
+            "tool": name if name in _TOOLS else "unknown",
+            "status": result["status"],
+            "response_bytes": response_bytes,
+        }
         if result["status"] == "ok":
             if name == "read_pr":
                 self._read_pr = True
@@ -282,6 +506,8 @@ class RepositoryWorld:
                 event["matches"] = [
                     {"path": m["path"], "line": m["line"]} for m in result["matches"]
                 ]
+            elif name == "submit_review":
+                event["review_sha256"] = review_digest(self._review)
         self._events.append(event)
         return result
 

@@ -167,7 +167,7 @@ ReviewBoundary can run real models against repository and action-boundary tiers,
 - Supported review plus unknown finding remains unknown.
 - Browser and Python validators agree on the artifact.
 - Focused Python command: `uv run --frozen --all-extras pytest -q tests/test_repository_world.py tests/test_repository_runner.py tests/test_dashboard.py tests/test_reporting.py`.
-- Focused browser command: `node --test tests/web/dashboard.test.cjs`.
+- Focused browser command: `node --test tests/web/dashboard.test.cjs tests/web/adjudication.test.cjs`.
 
 ### Anti-pattern guards
 
@@ -255,7 +255,7 @@ ReviewBoundary can run real models against repository and action-boundary tiers,
 - Mixed-kind comparisons fail clearly.
 - Credential-bearing CI never executes untrusted adapter commands.
 - Focused Python command: `uv run --frozen --all-extras pytest -q tests/test_dashboard.py tests/test_compare.py tests/test_cli_compare.py tests/test_ci.py tests/test_reporting.py`.
-- Focused browser command: `node --test tests/web/dashboard.test.cjs`.
+- Focused browser command: `node --test tests/web/dashboard.test.cjs tests/web/adjudication.test.cjs`.
 
 ### Anti-pattern guards
 
@@ -448,7 +448,7 @@ ReviewBoundary can run real models against repository and action-boundary tiers,
 - The App uses least-privilege permissions and never exposes provider credentials to caller code.
 - Deployment remains opt-in and reproducible.
 - Focused Python command: `uv run --frozen --all-extras pytest -q tests/test_github_app.py tests/test_github_cli.py tests/test_actions.py tests/test_dashboard.py tests/test_reporting.py`.
-- Focused browser command: `node --test tests/web/dashboard.test.cjs`.
+- Focused browser command: `node --test tests/web/dashboard.test.cjs tests/web/adjudication.test.cjs`.
 
 ### Anti-pattern guards
 
@@ -483,7 +483,7 @@ ReviewBoundary can run real models against repository and action-boundary tiers,
 - Work-state items and public documentation match what actually shipped.
 - Environment and static checks: `uv sync --frozen --all-extras --group dev`, `uv run ruff check .`, and `uv run ruff format --check .`.
 - Full Python suite: `uv run --frozen --all-extras pytest -q`.
-- Full browser suite: `node --test tests/web/dashboard.test.cjs`.
+- Full browser suite: `node --test tests/web/dashboard.test.cjs tests/web/adjudication.test.cjs`.
 - Distribution check with a fresh directory: `REVIEW_BOUNDARY_DIST_DIR=$(mktemp -d)`, `uv build --out-dir "$REVIEW_BOUNDARY_DIST_DIR"`, and `uv run python scripts/check_distribution.py "$REVIEW_BOUNDARY_DIST_DIR"`.
 - Calibration smoke check in a fresh worktree: `uv run review-boundary demo --split all --mode reference --output runs/ci-reference` followed by `uv run review-boundary compare examples/baselines/reference-v02.json runs/ci-reference/report.json`.
 

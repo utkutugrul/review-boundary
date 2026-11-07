@@ -5,13 +5,29 @@ from __future__ import annotations
 import asyncio
 import html
 import json
+import math
+import stat
 from datetime import UTC, datetime
+from importlib.metadata import version
 from pathlib import Path
+from urllib.error import HTTPError, URLError
 from uuid import uuid4
 
+from inspect_ai import eval
+
 from .adapter import AdapterConfig, AdapterProfile, RepositoryAdapterRequest, run_adapter
+from .budget import (
+    api_get,
+    ledger_artifact_paths,
+    model_snapshot,
+    planned_cost,
+    reserve,
+    settle,
+)
 from .json_input import read_json_object
+from .model_safety import ProviderRequestError, guarded_model
 from .provenance import experiment_provenance, json_digest
+from .providers import prepare_provider
 from .repository_cases import (
     REPOSITORY_CORPUS_VERSION,
     REPOSITORY_SCORING_VERSION,
@@ -48,6 +64,102 @@ def load_suite(path: Path | None) -> tuple[RepositoryCase, ...]:
     if len({case.case_id for case in cases}) != len(cases):
         raise ValueError("Repository case IDs must be unique")
     return cases
+
+
+def _logged_case(value) -> RepositoryCase:
+    return RepositoryCase.model_validate_json(json.dumps(value, allow_nan=False))
+
+
+def repository_rows_from_logs(
+    logs,
+    cases: tuple[RepositoryCase, ...],
+    reviewers: list[str],
+    epochs: int,
+) -> list[dict]:
+    """Extract only trusted scorer metadata and require exact manifest-slot coverage."""
+    by_digest = {case_digest(case): (index, case) for index, case in enumerate(cases)}
+    if len(by_digest) != len(cases):
+        raise ValueError("Repository cases must have unique immutable digests")
+    expected = {
+        (digest, reviewer, epoch)
+        for digest in by_digest
+        for reviewer in reviewers
+        for epoch in range(1, epochs + 1)
+    }
+    recorded = set()
+    rows = []
+    for log in logs:
+        reviewer = log.eval.model
+        if reviewer not in reviewers:
+            raise ValueError("Inspect log contains an undeclared repository reviewer")
+        for sample in log.samples or []:
+            failed = log.status != "success" or sample.error is not None
+            if not isinstance(sample.metadata, dict) or "case" not in sample.metadata:
+                raise ValueError("Repository sample is missing its immutable case metadata")
+            logged_case = _logged_case(sample.metadata["case"])
+            digest = case_digest(logged_case)
+            if digest not in by_digest or logged_case != by_digest[digest][1]:
+                raise ValueError("Repository sample case does not match the declared suite")
+            if sample.id != logged_case.case_id or type(sample.epoch) is not int:
+                raise ValueError("Repository sample identity is invalid")
+            slot = (digest, reviewer, sample.epoch)
+            if slot not in expected or slot in recorded:
+                raise ValueError("Repository sample slot is duplicate or undeclared")
+            score = (sample.scores or {}).get("repository_review_score")
+            if score is None or not isinstance(score.metadata, dict):
+                raise ValueError("Repository sample is missing trusted scorer metadata")
+            row = dict(score.metadata)
+            identity = {
+                "scoring_version": REPOSITORY_SCORING_VERSION,
+                "case_sha256": digest,
+                "case_id": logged_case.case_id,
+                "source_group": logged_case.source_group,
+                "variant": logged_case.variant,
+                "surface": logged_case.surface,
+            }
+            if any(row.get(key) != value for key, value in identity.items()):
+                raise ValueError("Repository scorer metadata does not bind to its sample")
+            if row.get("semantic_passed") is not None:
+                raise ValueError("Native repository runs cannot invent semantic adjudication")
+            row.update(
+                reviewer=reviewer,
+                epoch=sample.epoch,
+                instructions_key=f"input-{by_digest[digest][0]}",
+                error="Provider model evaluation failed; details withheld" if failed else None,
+            )
+            choices = sample.output.choices if sample.output else []
+            row["model_stop_reason"] = choices[0].stop_reason if choices else None
+            if failed:
+                row.update(completed=False, conclusive=False, rubric_passed=False)
+            json.dumps(row, allow_nan=False)
+            rows.append(row)
+            recorded.add(slot)
+    if recorded != expected:
+        raise ValueError("Inspect logs do not cover every declared repository sample slot")
+    return rows
+
+
+def repository_error_rows(
+    cases: tuple[RepositoryCase, ...], reviewer: str, epochs: int, error_code: str
+) -> list[dict]:
+    """Create explicit failed slots without accepting provider-controlled evidence."""
+    rows = []
+    for index, case in enumerate(cases):
+        for epoch in range(1, epochs + 1):
+            row = score_repository_world(case, RepositoryWorld(case))
+            row.update(
+                reviewer=reviewer,
+                epoch=epoch,
+                instructions_key=f"input-{index}",
+                stop_reason=error_code,
+                model_stop_reason=None,
+                error="Provider model evaluation failed; details withheld",
+                completed=False,
+                conclusive=False,
+                rubric_passed=False,
+            )
+            rows.append(row)
+    return rows
 
 
 def scripted_submission(files: dict[str, str], *, follow_payload: bool = False) -> dict:
@@ -154,7 +266,10 @@ def write_repository_report(rows: list[dict], output: Path, metadata: dict) -> P
             + escape(json.dumps(row, indent=2, ensure_ascii=False))
             + "</pre></details></details>"
         )
-    label = "Scripted calibration" if metadata["run_kind"] == "calibration" else "External reviewer"
+    label = {
+        "calibration": "Scripted calibration",
+        "model": "Native provider model",
+    }.get(metadata["run_kind"], "External reviewer")
     document = """<!doctype html><html lang="en"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
@@ -184,6 +299,251 @@ def write_repository_report(rows: list[dict], output: Path, metadata: dict) -> P
     path = output / "report.html"
     path.write_text(document, encoding="utf-8")
     return path
+
+
+def _repository_limits(args) -> RepositoryLimits:
+    return RepositoryLimits(
+        max_calls=args.max_calls,
+        max_response_bytes=args.max_response_bytes,
+        max_total_response_bytes=args.max_total_response_bytes,
+        max_read_lines=args.max_read_lines,
+        max_list_entries=args.max_list_entries,
+        max_search_matches=args.max_search_matches,
+    )
+
+
+def _path_without_symlinks(
+    value: Path, path_label: str, *, runner_label: str = "Repository model"
+) -> Path:
+    path = value.expanduser()
+    if not path.is_absolute():
+        path = Path.cwd() / path
+    for component in (*reversed(path.parents), path):
+        try:
+            if stat.S_ISLNK(component.lstat().st_mode):
+                raise ValueError(f"{runner_label} {path_label} must not contain symlinks")
+        except FileNotFoundError:
+            continue
+    return path
+
+
+def _repository_model_paths(
+    output_value: Path, ledger_value: Path, *, label: str = "Repository model"
+) -> tuple[Path, Path]:
+    """Validate every model-run path before the budget ledger or output is written."""
+    output = _path_without_symlinks(output_value, "output", runner_label=label)
+    ledger_paths = tuple(
+        _path_without_symlinks(path, "ledger path", runner_label=label)
+        for path in ledger_artifact_paths(ledger_value)
+    )
+    output_identity = output.resolve(strict=False)
+    ledger_identities = tuple(path.resolve(strict=False) for path in ledger_paths)
+    generated = tuple(
+        (output / name).resolve(strict=False)
+        for name in (
+            "suite.json",
+            "manifest.json",
+            "events.jsonl",
+            "report.json",
+            "report.html",
+            "logs",
+            "settlement.json",
+        )
+    )
+    for ledger_identity in ledger_identities:
+        if (
+            ledger_identity == output_identity
+            or ledger_identity.is_relative_to(output_identity)
+            or output_identity.is_relative_to(ledger_identity)
+            or ledger_identity in generated
+        ):
+            raise ValueError(f"{label} output and ledger artifacts must be separate paths")
+    if output.exists() and (not output.is_dir() or any(output.iterdir())):
+        raise ValueError(f"{label} output must be a new or empty directory")
+    return output, ledger_paths[0]
+
+
+def _complete_provider_cost(usage: dict) -> bool:
+    cost = usage.get("provider_reported_cost_usd")
+    return bool(
+        usage.get("api_calls_without_reported_cost") == 0
+        and usage.get("api_calls_with_reported_cost", 0) > 0
+        and not isinstance(cost, bool)
+        and isinstance(cost, (int, float))
+        and math.isfinite(cost)
+        and cost >= 0
+    )
+
+
+def run_repository_model(args) -> int:
+    """Run real provider models through Inspect while preserving repository semantics."""
+    from .cli import credential, usage_from_logs
+    from .repository_task import repository_review_task
+
+    if not 1 <= args.epochs <= 10:
+        raise ValueError("Repository runs require one to ten epochs")
+    if not 1 <= args.concurrency <= 8:
+        raise ValueError("concurrency must be between 1 and 8")
+    if not math.isfinite(args.budget) or args.budget <= 0:
+        raise ValueError("budget must be a positive finite number")
+    cases = load_suite(args.suite)
+    output, ledger = _repository_model_paths(args.output, args.ledger)
+    model_ids = list(dict.fromkeys(args.model))
+    plan = prepare_provider(
+        args.provider,
+        model_ids,
+        prompt_price_cap=args.prompt_price_cap,
+        completion_price_cap=args.completion_price_cap,
+        pricing_file=args.pricing_file,
+    )
+    reviewers = [plan.inspect_model_id(model_id) for model_id in model_ids]
+    limits = _repository_limits(args)
+    task = repository_review_task(
+        cases=cases,
+        limits=limits,
+        max_turns=args.max_turns,
+        max_input_bytes=args.max_input_bytes,
+        max_output_tokens=args.max_output_tokens,
+        reasoning_summary="none" if plan.name == "openai" else None,
+    )
+    run_id = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid4().hex[:8]
+    amount = planned_cost(
+        len(cases) * len(model_ids) * args.epochs,
+        args.max_turns,
+        args.max_input_bytes,
+        args.max_output_tokens,
+        plan.prompt_price_cap,
+        plan.completion_price_cap,
+    )
+    if amount > args.budget:
+        raise ValueError(
+            f"Conservative reservation ${amount:.4f} exceeds this repository run's budget"
+        )
+    metadata = {
+        "run_id": run_id,
+        "run_kind": "model",
+        "run_finished": False,
+        "scoring_version": REPOSITORY_SCORING_VERSION,
+        "corpus_version": REPOSITORY_CORPUS_VERSION if args.suite is None else "custom",
+        "suite_sha256": json_digest([case_digest(case) for case in cases]),
+        "inspect_ai_version": version("inspect-ai"),
+        "project_version": version("review-boundary"),
+        "epochs": args.epochs,
+        "case_count": len(cases),
+        "expected_count": len(cases) * len(model_ids) * args.epochs,
+        "reviewers": reviewers,
+        "expected_slots": [
+            {"case_sha256": case_digest(case), "reviewer": reviewer, "epoch": epoch}
+            for reviewer in reviewers
+            for case in cases
+            for epoch in range(1, args.epochs + 1)
+        ],
+        "world_limits": limits.model_dump(mode="json"),
+        "bounds": {
+            "max_turns": args.max_turns,
+            "max_input_bytes": args.max_input_bytes,
+            "max_output_tokens": args.max_output_tokens,
+            "retries": 0,
+        },
+        "sampling": "Provider defaults; temperature and parallel tool calls are not forced.",
+        "observation_scope": "inspect_tool_calls_and_trusted_scorer_metadata_only",
+        "os_sandboxed": False,
+        "provider": plan.to_metadata(),
+        "planned_reservation_usd": amount,
+        "provenance": task.metadata["provenance"],
+    }
+    if plan.name == "openrouter":
+        metadata["catalog"] = model_snapshot(
+            model_ids, plan.prompt_price_cap, plan.completion_price_cap
+        )
+        metadata["provider_policy"] = plan.model_args()["provider"]
+    else:
+        metadata["billing_note"] = (
+            "Native API prices are recorded assumptions, not remote price caps. "
+            "Unknown billed costs retain the conservative reservation."
+        )
+    if args.dry_run:
+        print(json.dumps(metadata, indent=2))
+        return 0
+    key = credential(args, plan)
+    before = api_get("key", key)["data"] if plan.name == "openrouter" else {}
+    remaining = before.get("limit_remaining")
+    if remaining is not None and remaining < amount:
+        raise ValueError("OpenRouter key remaining credit cap is below the planned reservation")
+    metadata["budget"] = reserve(ledger, amount, args.budget, run_id)
+    suite = {
+        "schema_version": 1,
+        "cases": [case.model_dump(mode="json") for case in cases],
+    }
+    output.mkdir(parents=True, exist_ok=True)
+    (output / "suite.json").write_text(json.dumps(suite, indent=2) + "\n")
+    (output / "manifest.json").write_text(json.dumps(metadata, indent=2) + "\n")
+    rows = []
+    logs = []
+    integrity_error = False
+    incomplete_provider_usage = False
+    for model_id, reviewer in zip(model_ids, reviewers, strict=True):
+        print(
+            f"Running {model_id}: {len(cases)} repository cases x {args.epochs} epochs",
+            flush=True,
+        )
+        try:
+            current_logs = eval(
+                [task],
+                model=guarded_model(plan, model_id),
+                epochs=args.epochs,
+                max_samples=args.concurrency,
+                log_dir=str(output / "logs"),
+                display="none",
+                log_model_api=True,
+            )
+        except ProviderRequestError:
+            rows.extend(repository_error_rows(cases, reviewer, args.epochs, "provider_error"))
+            integrity_error = True
+            incomplete_provider_usage = True
+        else:
+            logs.extend(current_logs)
+            if not _complete_provider_cost(usage_from_logs(current_logs, plan)):
+                incomplete_provider_usage = True
+            try:
+                rows.extend(repository_rows_from_logs(current_logs, cases, [reviewer], args.epochs))
+            except ValueError:
+                rows.extend(repository_error_rows(cases, reviewer, args.epochs, "invalid_eval_log"))
+                integrity_error = True
+        metadata["usage"] = usage_from_logs(logs, plan)
+        (output / "events.jsonl").write_text(
+            "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows)
+        )
+        write_repository_report(rows, output, metadata)
+    if plan.name == "openrouter":
+        try:
+            after = api_get("key", key)["data"]
+            metadata["shared_key_usage_delta_usd"] = after.get("usage", 0) - before.get("usage", 0)
+            metadata["key_usage_note"] = (
+                "May include concurrent use by other apps and delayed billing."
+            )
+        except (HTTPError, URLError, TimeoutError):
+            metadata["key_usage_note"] = "Post-run key usage could not be fetched."
+    metadata["usage"] = usage_from_logs(logs, plan)
+    metadata["run_finished"] = True
+    (output / "manifest.json").write_text(json.dumps(metadata, indent=2) + "\n")
+    report = write_repository_report(rows, output, metadata)
+    log_error = any(
+        log.status != "success" or any(sample.error for sample in log.samples or []) for log in logs
+    )
+    row_error = any(row["error"] for row in rows)
+    settlement_eligible = bool(
+        not integrity_error
+        and not log_error
+        and not row_error
+        and not incomplete_provider_usage
+        and _complete_provider_cost(metadata["usage"])
+    )
+    if settlement_eligible:
+        settlement = settle(ledger, run_id, output / "report.json")
+        (output / "settlement.json").write_text(json.dumps(settlement, indent=2) + "\n")
+    print("Repository evidence report: " + str(report.resolve()))
+    return 2 if integrity_error or log_error or row_error else 0
 
 
 async def run_repository(args) -> int:

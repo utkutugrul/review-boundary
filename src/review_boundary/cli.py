@@ -42,6 +42,34 @@ def parser():
         command.add_argument("--policy", type=Path, help="Optional trusted local policy process")
         if name == "boundary-run-adapter":
             command.add_argument("--adapter", type=Path, required=True)
+    boundary_model = commands.add_parser(
+        "boundary-run-model", help="Run provider models with virtual action boundaries"
+    )
+    boundary_model.add_argument("--output", type=Path, required=True)
+    boundary_model.add_argument("--suite", type=Path)
+    boundary_model.add_argument("--epochs", type=int, default=1)
+    boundary_model.add_argument("--guard", choices=("both", "on", "off"), default="both")
+    boundary_model.add_argument("--max-turns", type=int, default=12)
+    boundary_model.add_argument("--max-input-bytes", type=int, default=24000)
+    boundary_model.add_argument("--max-output-tokens", type=int, default=8192)
+    boundary_model.add_argument("--max-calls", type=int, default=64)
+    boundary_model.add_argument("--max-response-bytes", type=int, default=16384)
+    boundary_model.add_argument("--max-total-response-bytes", type=int, default=262144)
+    boundary_model.add_argument("--max-read-lines", type=int, default=80)
+    boundary_model.add_argument("--max-list-entries", type=int, default=20)
+    boundary_model.add_argument("--max-search-matches", type=int, default=20)
+    boundary_model.add_argument(
+        "--provider", choices=("openrouter", "openai", "anthropic"), default="openrouter"
+    )
+    boundary_model.add_argument("--model", action="append", required=True)
+    boundary_model.add_argument("--pricing-file", type=Path)
+    boundary_model.add_argument("--opencode-auth", type=Path)
+    boundary_model.add_argument("--budget", type=float, default=20.0)
+    boundary_model.add_argument("--ledger", type=Path, default=Path("runs/budget.json"))
+    boundary_model.add_argument("--prompt-price-cap", type=float)
+    boundary_model.add_argument("--completion-price-cap", type=float)
+    boundary_model.add_argument("--concurrency", type=int, default=2)
+    boundary_model.add_argument("--dry-run", action="store_true")
     for name in ("repository-demo", "repository-run-adapter"):
         command = commands.add_parser(name, help="Run the opt-in multi-file repository contract")
         command.add_argument("--output", type=Path, required=True)
@@ -51,6 +79,62 @@ def parser():
             command.add_argument(
                 "--suite", type=Path, help="Custom evaluator-only repository suite"
             )
+    export = commands.add_parser(
+        "adjudication-export", help="Create an all-unknown repository adjudication template"
+    )
+    export.add_argument("--report", type=Path, required=True)
+    export.add_argument("--suite", type=Path, required=True, help="Original evaluator suite")
+    export.add_argument("--output", type=Path, required=True)
+    label_ui = commands.add_parser(
+        "adjudication-ui", help="Write a self-contained offline page for labeling findings"
+    )
+    label_ui.add_argument("--report", type=Path, required=True)
+    label_ui.add_argument("--suite", type=Path, required=True, help="Original evaluator suite")
+    label_ui.add_argument("--output", type=Path, required=True, help="New HTML file")
+    agreement = commands.add_parser(
+        "adjudication-agreement",
+        help="Report exact agreement and Cohen kappa for two complete adjudications",
+    )
+    agreement.add_argument("--report", type=Path, required=True)
+    agreement.add_argument("--suite", type=Path, required=True, help="Original evaluator suite")
+    agreement.add_argument("--rater-a", type=Path, required=True)
+    agreement.add_argument("--rater-b", type=Path, required=True)
+    agreement.add_argument("--output", type=Path, help="New JSON file for the full result")
+    apply = commands.add_parser(
+        "adjudication-apply", help="Apply digest-bound adjudication to a new repository report"
+    )
+    apply.add_argument("--report", type=Path, required=True)
+    apply.add_argument("--suite", type=Path, required=True, help="Original evaluator suite")
+    apply.add_argument("--adjudication", type=Path, required=True)
+    apply.add_argument("--logs", type=Path, nargs="+", required=True, help="Trusted Inspect logs")
+    apply.add_argument("--output", type=Path, required=True)
+    repository_model = commands.add_parser(
+        "repository-run-model", help="Run provider models in the multi-file repository contract"
+    )
+    repository_model.add_argument("--output", type=Path, required=True)
+    repository_model.add_argument("--suite", type=Path)
+    repository_model.add_argument("--epochs", type=int, default=1)
+    repository_model.add_argument("--max-turns", type=int, default=8)
+    repository_model.add_argument("--max-input-bytes", type=int, default=24000)
+    repository_model.add_argument("--max-output-tokens", type=int, default=8192)
+    repository_model.add_argument("--max-calls", type=int, default=64)
+    repository_model.add_argument("--max-response-bytes", type=int, default=16384)
+    repository_model.add_argument("--max-total-response-bytes", type=int, default=262144)
+    repository_model.add_argument("--max-read-lines", type=int, default=80)
+    repository_model.add_argument("--max-list-entries", type=int, default=20)
+    repository_model.add_argument("--max-search-matches", type=int, default=20)
+    repository_model.add_argument(
+        "--provider", choices=("openrouter", "openai", "anthropic"), default="openrouter"
+    )
+    repository_model.add_argument("--model", action="append", required=True)
+    repository_model.add_argument("--pricing-file", type=Path)
+    repository_model.add_argument("--opencode-auth", type=Path)
+    repository_model.add_argument("--budget", type=float, default=20.0)
+    repository_model.add_argument("--ledger", type=Path, default=Path("runs/budget.json"))
+    repository_model.add_argument("--prompt-price-cap", type=float)
+    repository_model.add_argument("--completion-price-cap", type=float)
+    repository_model.add_argument("--concurrency", type=int, default=2)
+    repository_model.add_argument("--dry-run", action="store_true")
     for name in ("demo", "run", "run-adapter"):
         command = commands.add_parser(name)
         command.add_argument("--output", type=Path)
@@ -493,14 +577,45 @@ def main(argv=None):
             from .upstream_runner import export_upstream
 
             return export_upstream(args)
-        if args.command in ("boundary-demo", "boundary-run-adapter"):
-            from .boundary_runner import run_boundary_command
+        if args.command in ("boundary-demo", "boundary-run-adapter", "boundary-run-model"):
+            from .boundary_runner import run_boundary_command, run_boundary_model
 
-            return run_boundary_command(args)
-        if args.command in ("repository-demo", "repository-run-adapter"):
-            from .repository_runner import run_repository_command
+            return (
+                run_boundary_model(args)
+                if args.command == "boundary-run-model"
+                else run_boundary_command(args)
+            )
+        if args.command in (
+            "repository-demo",
+            "repository-run-adapter",
+            "repository-run-model",
+        ):
+            from .repository_runner import run_repository_command, run_repository_model
 
-            return run_repository_command(args)
+            return (
+                run_repository_model(args)
+                if args.command == "repository-run-model"
+                else run_repository_command(args)
+            )
+        if args.command == "adjudication-ui":
+            from .repository_adjudication_ui import adjudication_ui_command
+
+            return adjudication_ui_command(args)
+        if args.command == "adjudication-agreement":
+            from .repository_adjudication_agreement import agreement_command
+
+            return agreement_command(args)
+        if args.command in ("adjudication-export", "adjudication-apply"):
+            from .repository_adjudication import (
+                apply_adjudication_command,
+                export_adjudication_command,
+            )
+
+            return (
+                export_adjudication_command(args)
+                if args.command == "adjudication-export"
+                else apply_adjudication_command(args)
+            )
         if args.command == "dashboard":
             from .dashboard import default_report_paths, write_dashboard
 

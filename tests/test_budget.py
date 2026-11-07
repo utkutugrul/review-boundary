@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from review_boundary.budget import planned_cost, reserve, settle
+from review_boundary.budget import planned_cost, reserve, save_ledger, settle
 
 
 def test_reservation_bounds_known_cost():
@@ -35,6 +35,39 @@ def test_lock_fails_closed(tmp_path):
     with pytest.raises(ValueError, match="locked"):
         reserve(ledger, 1, 20, "one")
     assert not ledger.exists()
+
+
+@pytest.mark.parametrize("suffix", [".lock", ".tmp", ".LOCK", ".TMP"])
+@pytest.mark.parametrize("operation", ["reserve", "settle", "save"])
+def test_ledger_companion_aliases_are_rejected_before_creating_artifacts(
+    tmp_path, suffix, operation
+):
+    ledger = tmp_path / "new" / ("budget" + suffix)
+    with pytest.raises(ValueError, match="must not end in .lock or .tmp"):
+        if operation == "reserve":
+            reserve(ledger, 1, 20, "one")
+        elif operation == "settle":
+            settle(ledger, "one", tmp_path / "missing-report.json")
+        else:
+            save_ledger(ledger, {"limit_usd": 20, "runs": []})
+    assert not ledger.parent.exists()
+
+
+@pytest.mark.parametrize("suffix", [".lock", ".tmp"])
+@pytest.mark.parametrize("operation", ["reserve", "settle", "save"])
+def test_rejected_ledger_alias_preserves_existing_companion(tmp_path, suffix, operation):
+    ledger = tmp_path / ("budget" + suffix)
+    ledger.write_text("preserve existing artifact")
+    before = ledger.read_bytes()
+    with pytest.raises(ValueError, match="must not end in .lock or .tmp"):
+        if operation == "reserve":
+            reserve(ledger, 1, 20, "one")
+        elif operation == "settle":
+            settle(ledger, "one", tmp_path / "missing-report.json")
+        else:
+            save_ledger(ledger, {"limit_usd": 20, "runs": []})
+    assert ledger.read_bytes() == before
+    assert list(tmp_path.iterdir()) == [ledger]
 
 
 def billing_report(tmp_path, **changes):

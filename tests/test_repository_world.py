@@ -16,6 +16,7 @@ from review_boundary.repository_world import (
     RepositoryLimitError,
     RepositoryLimits,
     RepositoryWorld,
+    RepositoryWorldSnapshot,
     ReviewAdjudication,
     finding_digest,
     review_digest,
@@ -569,6 +570,138 @@ def test_observed_trace_and_submitted_review_are_defensive_copies():
     review["findings"][0]["evidence"].clear()
     assert world.review != review
     assert score_repository_world(selected, world)["rubric_passed"]
+
+
+def test_world_snapshot_round_trip_preserves_every_mutable_field():
+    selected = case(surface="readme")
+    limits = RepositoryLimits(
+        max_calls=40,
+        max_response_bytes=12000,
+        max_total_response_bytes=200000,
+        max_read_lines=40,
+        max_list_entries=10,
+        max_search_matches=8,
+    )
+    world = RepositoryWorld(selected, limits)
+    observe(world)
+    world.dispatch("search_files", {"query": "return", "limit": 4})
+    world.dispatch("write_file", {"path": "src/service.py", "content": "blocked"})
+    submit(world, [finding(selected)])
+    snapshot = world.snapshot()
+    restored = RepositoryWorld.from_snapshot(selected, snapshot, expected_limits=limits)
+    assert restored.snapshot() == snapshot
+    assert restored.events == world.events
+    assert restored.review == world.review
+    assert restored.write_requests == world.write_requests == 1
+    assert restored.calls == world.calls and restored.output_bytes == world.output_bytes
+    assert restored.exposed and restored.fatal_error is None
+    assert restored.limits == limits
+    assert score_repository_world(selected, restored) == score_repository_world(selected, world)
+    snapshot["events"].clear()
+    snapshot["observed"].clear()
+    assert restored.events and restored.snapshot()["observed"]
+
+
+def test_world_snapshot_rejects_fabricated_review_bytes_and_limit_escalation():
+    selected = case()
+    limits = RepositoryLimits(max_calls=32, max_total_response_bytes=100000)
+    world = RepositoryWorld(selected, limits)
+    observe(world)
+    submit(world, [finding(selected)])
+    snapshot = world.snapshot()
+    json.dumps(snapshot, allow_nan=False)
+    assert snapshot["output_bytes"] == sum(event["response_bytes"] for event in snapshot["events"])
+
+    fabricated_review = json.loads(json.dumps(snapshot))
+    fabricated_review["review"]["findings"][0]["summary"] = "Fabricated replacement claim."
+    with pytest.raises(ValueError, match="review does not match"):
+        RepositoryWorld.from_snapshot(selected, fabricated_review, expected_limits=limits)
+
+    reset_output_bytes = json.loads(json.dumps(snapshot))
+    reset_output_bytes["output_bytes"] = 0
+    with pytest.raises(ValueError, match="output bytes do not match"):
+        RepositoryWorld.from_snapshot(selected, reset_output_bytes, expected_limits=limits)
+
+    raised_max_calls = json.loads(json.dumps(snapshot))
+    raised_max_calls["limits"]["max_calls"] = 512
+    with pytest.raises(ValueError, match="trusted limits"):
+        RepositoryWorld.from_snapshot(selected, raised_max_calls, expected_limits=limits)
+
+
+def test_world_snapshot_rejects_changed_case_duplicate_data_and_incoherent_trace():
+    selected = case(surface="readme")
+    world = RepositoryWorld(selected)
+    observe(world)
+    snapshot = world.snapshot()
+    with pytest.raises(ValueError, match="does not bind"):
+        RepositoryWorld.from_snapshot(
+            case("fixed", "readme"), snapshot, expected_limits=world.limits
+        )
+
+    duplicate_path = json.loads(json.dumps(snapshot))
+    duplicate_path["observed"].append(duplicate_path["observed"][0])
+    with pytest.raises(ValueError, match="Observed paths must be unique"):
+        RepositoryWorld.from_snapshot(selected, duplicate_path, expected_limits=world.limits)
+
+    duplicate_line = json.loads(json.dumps(snapshot))
+    duplicate_line["observed"][0]["lines"].append(duplicate_line["observed"][0]["lines"][0])
+    with pytest.raises(ValueError, match="sorted and unique"):
+        RepositoryWorld.from_snapshot(selected, duplicate_line, expected_limits=world.limits)
+
+    missing_event = json.loads(json.dumps(snapshot))
+    missing_event["events"].pop()
+    with pytest.raises(ValueError, match="exactly one event"):
+        RepositoryWorld.from_snapshot(selected, missing_event, expected_limits=world.limits)
+
+    invented_observation = json.loads(json.dumps(snapshot))
+    invented_observation["observed"][0]["lines"].append(999999)
+    with pytest.raises(ValueError):
+        RepositoryWorld.from_snapshot(selected, invented_observation, expected_limits=world.limits)
+
+
+def test_world_snapshot_rejects_oversized_and_inconsistent_state():
+    selected = case()
+    world = RepositoryWorld(selected)
+    observe(world)
+    snapshot = world.snapshot()
+
+    too_much_output = json.loads(json.dumps(snapshot))
+    too_much_output["limits"]["max_total_response_bytes"] = 256
+    with pytest.raises(ValueError, match="output bytes exceed"):
+        RepositoryWorld.from_snapshot(selected, too_much_output, expected_limits=world.limits)
+
+    false_exposure = json.loads(json.dumps(snapshot))
+    false_exposure["exposed"] = True
+    with pytest.raises(ValueError, match="exposure state"):
+        RepositoryWorld.from_snapshot(selected, false_exposure, expected_limits=world.limits)
+
+    unexpected_review = json.loads(json.dumps(snapshot))
+    unexpected_review["review"] = {"verdict": "approve", "findings": []}
+    with pytest.raises(ValueError, match="submission state"):
+        RepositoryWorld.from_snapshot(selected, unexpected_review, expected_limits=world.limits)
+
+    with pytest.raises(ValueError):
+        RepositoryWorldSnapshot.model_validate_json(
+            json.dumps({**snapshot, "events": snapshot["events"] * 600})
+        )
+
+
+def test_fatal_world_snapshot_round_trip_retains_limit_failure():
+    selected = case()
+    world = RepositoryWorld(selected, RepositoryLimits(max_calls=1))
+    world.dispatch("read_pr", {})
+    with pytest.raises(RepositoryLimitError):
+        world.dispatch("read_pr", {})
+    restored = RepositoryWorld.from_snapshot(
+        selected, world.snapshot(), expected_limits=world.limits
+    )
+    assert restored.fatal_error == "calls"
+    assert restored.events[-1] == {
+        "tool": "limits",
+        "status": "calls",
+        "response_bytes": 0,
+    }
+    assert not score_repository_world(selected, restored)["completed"]
 
 
 def test_several_independent_issues_are_counted_separately():

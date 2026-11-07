@@ -1,6 +1,6 @@
 # Model providers
 
-ReviewBoundary supports OpenRouter, native OpenAI, and native Anthropic through Inspect's existing providers. Select one provider per run and pass that provider's model IDs. Scoring and corpus versions remain `0.2.0`; adding a provider does not rewrite earlier baselines.
+ReviewBoundary supports OpenRouter, native OpenAI, and native Anthropic through Inspect's existing providers. Select one provider per run and pass that provider's model IDs. The legacy tier remains scoring and corpus version `0.2.0`; repository and boundary modes keep their separate native contracts. Adding a provider does not rewrite earlier baselines.
 
 | Provider | CLI selection | Credential environment variable | Fixed endpoint | Inspect model prefix |
 | --- | --- | --- | --- | --- |
@@ -17,6 +17,23 @@ Set only the selected provider's API credential through your environment or the 
 Provider and authentication overrides are rejected by name, without echoing their values. These include the selected provider's custom base URL variables, alternative cloud-service credentials and endpoints, and Inspect model override variables. OpenAI organization/project overrides are rejected as well. Anthropic OAuth, profile, and federation overrides are unsupported: notably, installed Inspect checks `ANTHROPIC_AUTH_TOKEN` before its native API-key path, so that variable must be unset for a native-key run. Other providers' ordinary API keys may coexist without being selected.
 
 The runner pins official endpoint URLs. It does not accept arbitrary model arguments, custom endpoints, cloud service prefixes, or fallback authentication from the native CLI. This restriction concerns provider selection and authentication; it is not a network sandbox for the host process.
+
+## Tool argument validation
+
+OpenRouter runs explicitly set Inspect's `strict_tools=False`. The native tool
+contract includes optional fields and defaults, such as the `list_files` cursor
+and the `read_file` start line. [OpenAI strict function calling](https://developers.openai.com/api/docs/guides/function-calling#strict-mode)
+requires every property to be required, so enabling it for these schemas can
+cause a provider to reject the whole request. The provider request metadata
+records `strict_tools: false`; the tool definitions and their defaults are
+preserved.
+
+Repository and boundary worlds enforce their strict argument, range, path, and
+resource checks when dispatching calls. Boundary mode also records malformed
+effect calls and unknown tools in its attempt metrics. Provider-side tool
+generation therefore uses the existing optional-argument contract while the
+evaluator validates each operation. Native OpenAI and Anthropic keep their
+existing transport settings.
 
 ## Native pricing files
 
@@ -63,6 +80,40 @@ uv run review-boundary run \
 ```
 
 For Anthropic, change the provider, model ID, and pricing-file path. Removing `--dry-run` starts a paid evaluation and requires the selected API key. Choose a new output directory for each run. The standard live default remains five epochs when `--epochs` is omitted; the example reduces the initial scope explicitly.
+
+The multi-file repository contract uses the same provider and accounting flags:
+
+```sh
+uv run review-boundary repository-run-model \
+  --provider anthropic \
+  --model YOUR_NATIVE_MODEL_ID \
+  --pricing-file anthropic-pricing.json \
+  --epochs 1 \
+  --output runs/repository-model \
+  --budget 20 --dry-run
+```
+
+Repository dry runs also avoid credential loading, ledger writes, model
+construction, and output creation. OpenRouter dry runs still validate the
+selected model against the public live catalog.
+
+Action-boundary mode uses the same provider controls and reserves for every
+selected case, guard arm, model, epoch, and bounded generation turn:
+
+```sh
+uv run review-boundary boundary-run-model \
+  --provider anthropic \
+  --model YOUR_NATIVE_MODEL_ID \
+  --pricing-file anthropic-pricing.json \
+  --guard both --epochs 1 \
+  --output runs/boundary-model \
+  --budget 20 --dry-run
+```
+
+Guard arms use matching public inputs and tool schemas but remain independent
+model generations. The native boundary runner supports only the built-in
+exact-grant policy in this release. See [action-boundary mode](boundary-mode.md)
+for attempt accounting, pairing exclusions, and the separate report contract.
 
 ## Request controls and accounting
 

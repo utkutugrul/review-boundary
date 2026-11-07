@@ -27,6 +27,46 @@ findings, cited source ranges, tool events, and experiment metadata inspectable.
 An exit code of 0 means the run finished without recorded execution errors;
 it does not mean every review passed. Execution errors return 2.
 
+## Run a provider model
+
+Repository mode can use the same OpenRouter, native OpenAI, or native Anthropic
+controls as the original suite. Preview a native OpenAI run without loading a
+credential or creating output files:
+
+```sh
+uv run --frozen review-boundary repository-run-model \
+  --provider openai \
+  --model YOUR_NATIVE_MODEL_ID \
+  --pricing-file openai-pricing.json \
+  --epochs 1 \
+  --output runs/repository-model \
+  --budget 20 \
+  --dry-run
+```
+
+Remove `--dry-run` to start the paid run after setting the selected provider's
+API key. OpenRouter uses its live catalog and price ceiling instead of a local
+pricing file. See the [provider guide](providers.md) for endpoint, credential,
+pricing, and reservation rules.
+
+The command accepts `--suite`, repeated `--model`, `--epochs`, `--concurrency`,
+the generation bounds `--max-turns`, `--max-input-bytes`, and
+`--max-output-tokens`, plus all six virtual-world limits. Every model and epoch
+starts from a fresh validated world snapshot. Inspect logs are accepted only
+when trusted scorer metadata covers each declared case, model, and epoch slot.
+Missing or duplicate slots fail closed. Provider failures produce explicit
+failed rows without copying provider response bodies into the report.
+
+The local budget ledger reserves a conservative maximum before model creation.
+A reservation is released only when every recorded provider call has complete
+provider-reported cost evidence and every selected model execution is free of
+provider, integrity, log, and row failures. Token-based SDK estimates do not
+settle it. The output must be a new or empty path without symlink components.
+The ledger and its `.lock` and `.tmp` companions must stay outside the output
+tree and must not overlap generated artifacts.
+The report still keeps `semantic_passed` as `null`; using a real model does not
+turn structural rubric matching into semantic adjudication.
+
 ## A separate report contract
 
 | Mode | Scoring version | Corpus version | Report format |
@@ -115,7 +155,9 @@ reasoning. `semantic_passed` stays `null` until explicit evaluator adjudication.
 Unjudged findings remain `unknown_findings`, not false positives. Duplicate
 findings do not increase unique issue or adjudication counts.
 
-Adjudication is **Python API only** through `score_repository_world()`:
+Adjudication is applied through `score_repository_world()`. Two commands wrap it
+for native model runs (`adjudication-export` and `adjudication-apply`, described
+below); there is no automatic semantic judge:
 
 - `FindingAdjudication` binds `case_sha256` and `finding_sha256` to a decision
   of `supported`, `rejected`, or `unknown`, with a reason and optional `issue_id`.
@@ -126,11 +168,80 @@ Adjudication is **Python API only** through `score_repository_world()`:
 Use `case_digest()`, `finding_digest()`, and `review_digest()` for these identities.
 Changed content invalidates the binding. Supply finding decisions as
 `adjudications=` and the whole-review decision as `review_adjudication=`.
-There is no automatic semantic judge or adjudication-import CLI.
+
+### Adjudication artifacts
+
+```bash
+review-boundary adjudication-export --report run/report.json --suite run/suite.json \
+  --output template.json
+review-boundary adjudication-apply --report run/report.json --suite run/suite.json \
+  --adjudication labeled.json --logs run/logs --output run-adjudicated
+```
+
+The artifact (`adjudication_kind: "repository"`, `schema_version: 1`) holds the
+canonical `source_report_sha256`, `finding_decisions`, and `review_decisions`. It
+contains digests, decisions, issue mappings, and reasons only: no prompts, model
+responses, or finding text. The export lists each unique finding and review as
+`unknown`.
+
+Import fails closed on a stale or foreign report digest, unknown case, finding,
+or review digests, digests from rows that recorded an error, duplicate or
+conflicting decisions, unknown issue IDs, an `unknown` decision carrying an issue
+mapping, and a `supported` finding mapped to an `absent` issue. Partial artifacts
+are accepted; unlisted findings stay `unknown`.
+
+Application never reads semantics from report rows. It restores each row's frozen
+world snapshot from the trusted Inspect logs, rescores it against the original
+evaluator suite, requires the result to equal the source row, and then changes
+only the adjudication fields. An edited row, review, or event trace is rejected.
+The output is a new directory; the source report is not modified. Only native
+`repository-run-model` runs retain snapshots, so calibration and adapter reports
+cannot be adjudicated this way yet. Boundary reports are not supported.
+
+### Labeling page
+
+```bash
+review-boundary adjudication-ui --report run/report.json --suite run/suite.json \
+  --output labeler.html
+```
+
+This writes one new HTML file (an existing output, a symlink, or an input path is
+refused). Open it locally. It shows each unique finding and whole review with its
+recorded text and the evaluator rubric issues, and starts every item as `unknown`.
+You can edit only the decision, an optional issue mapping, and the reason. Moving
+an item off `unknown` clears the placeholder reason, so a real one must be written.
+Nothing is pre-judged. **Export artifact** downloads `repository-adjudication.json`;
+**Import labels** loads a previous export (unlisted items stay `unknown`).
+
+The page makes no network requests and loads no CDN assets. Its CSP allows only the
+page's own script and style by SHA-256 hash, recorded text is embedded as escaped
+inert JSON, and the page is built from text nodes only. Imports are limited to
+16 MiB and exports to 16 MiB. The browser validator uses a strict JSON parser
+(duplicate keys, non-integer numbers, and deep nesting are rejected) and enforces the
+same rules as `adjudication-apply`, including digest, duplicate, and issue-mapping
+checks. Parity tests run both validators over the same cases. `adjudication-apply`
+still re-validates every file, so the page is a convenience, not an authority.
+
+### Inter-rater agreement
+
+```bash
+review-boundary adjudication-agreement --report run/report.json --suite run/suite.json \
+  --rater-a a.json --rater-b b.json --output agreement.json
+```
+
+Both artifacts must be complete (a decision for every recorded finding and review),
+bind to this report and suite, and cover identical digest sets. Incomplete,
+mismatched, stale, or invalid artifacts are rejected rather than aligned. The result
+reports exact agreement and Cohen's kappa for findings, reviews, and overall.
+`unknown` is an explicit third label. Only decision labels are compared; reasons are
+not, and issue mappings are counted separately for findings. Kappa is `null` when
+both raters use one identical label. This is optional evidence about the labels, not
+a semantic judge, and it is not defined for boundary reports.
 
 ## Custom suite JSON
 
-Pass `--suite path/to/suite.json` to `repository-run-adapter`. The top-level
+Pass `--suite path/to/suite.json` to `repository-run-adapter` or
+`repository-run-model`. The top-level
 object contains exactly `schema_version: 1` and `cases`, with 1 through 32
 uniquely named cases. `RepositoryCase.model_validate_json()` validates each case.
 

@@ -27,10 +27,18 @@ def planned_cost(samples, turns, input_bytes, output_tokens, prompt_price, compl
     return math.ceil(cost * RESERVATION_MARGIN * 1_000_000) / 1_000_000
 
 
+def ledger_artifact_paths(path: Path) -> tuple[Path, Path, Path]:
+    """Return the ledger, exclusive lock, and atomic replacement paths."""
+    path = Path(path)
+    if path.suffix.lower() in {".lock", ".tmp"}:
+        raise ValueError("Budget ledger filename must not end in .lock or .tmp")
+    return path, path.with_suffix(".lock"), path.with_suffix(".tmp")
+
+
 @contextmanager
 def ledger_lock(path: Path):
+    path, lock, _ = ledger_artifact_paths(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    lock = path.with_suffix(".lock")
     try:
         fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
     except FileExistsError as exc:
@@ -43,7 +51,7 @@ def ledger_lock(path: Path):
 
 
 def save_ledger(path: Path, data: dict) -> None:
-    temporary = path.with_suffix(".tmp")
+    path, _, temporary = ledger_artifact_paths(path)
     temporary.write_text(json.dumps(data, indent=2) + "\n")
     os.replace(temporary, path)
 
@@ -76,6 +84,7 @@ def reserve(path: Path, amount: float, limit: float, run_id: str) -> dict:
 
 def settle(path: Path, run_id: str, report_path: Path) -> dict:
     """Settle a finished run only with complete per-call provider billing evidence."""
+    path, _, _ = ledger_artifact_paths(path)
     raw = report_path.read_bytes()
     report = json.loads(raw)
     metadata = report["metadata"]

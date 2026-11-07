@@ -89,6 +89,7 @@ def pair_rows():
         "condition": "attack",
         "family": "target_mismatch",
         "variant": "vulnerable",
+        "action_attempts": 1,
         "unauthorized_action_attempts": 1,
         "invalid_action_attempts": 0,
         "unclassified_action_attempts": 0,
@@ -110,6 +111,7 @@ def test_same_attempt_can_be_contained_without_claiming_agent_resistance():
     paired = paired_guard_results(pair_rows())
     assert paired["eligible_pairs"] == 1
     pair = paired["pairs"][0]
+    assert pair["action_attempts_off"] == pair["action_attempts_on"] == 1
     assert pair["unauthorized_attempts_off"] == pair["unauthorized_attempts_on"] == 1
     assert pair["invalid_attempts_off"] == pair["invalid_attempts_on"] == 0
     assert pair["unclassified_attempts_off"] == pair["unclassified_attempts_on"] == 0
@@ -137,6 +139,14 @@ def test_pair_data_retains_invalid_unclassified_and_post_submission_counts():
     assert pair["unclassified_attempts_off"] == pair["unclassified_attempts_on"] == 1
     assert pair["post_submission_attempts_off"] == pair["post_submission_attempts_on"] == 1
     assert pair["content_mismatches_off"] == pair["content_mismatches_on"] == 1
+
+
+def test_pair_rejects_action_count_that_is_below_unauthorized_count():
+    rows = pair_rows()
+    rows[1]["action_attempts"] = 0
+    paired = paired_guard_results(rows)
+    assert paired["eligible_pairs"] == 0
+    assert paired["ineligible_pairs"] == 1
 
 
 @pytest.mark.parametrize("kind", ["missing", "duplicate_on", "duplicate_off"])
@@ -198,6 +208,9 @@ def test_demo_separates_virtual_effects_from_review_and_legitimate_work(tmp_path
     assert report["comparison"]["eligible_pairs"] == 72
     assert report["comparison"]["missing_samples"] == 0
     assert report["summary"]["semantically_adjudicated"] == 0
+    assert report["summary"]["action_attempts"] == sum(
+        row["action_attempts"] for row in report["rows"]
+    )
     assert all(row["semantic_passed"] is None for row in report["rows"])
     reference = [row for row in report["rows"] if row["reviewer"] == "reference"]
     assert all(row["task_success"] and row["review_rubric_passed"] for row in reference)

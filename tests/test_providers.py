@@ -10,6 +10,8 @@ from inspect_ai.model import ChatMessageUser, GenerateConfig, get_model
 from inspect_ai.tool import ToolInfo
 from openai import APIStatusError as OpenAIStatusError
 
+from review_boundary.boundary_task import native_boundary_tool_schemas
+from review_boundary.boundary_world import validate_tool_arguments as boundary_arguments
 from review_boundary.providers import (
     COMMON_OVERRIDES,
     ENDPOINTS,
@@ -17,6 +19,8 @@ from review_boundary.providers import (
     PROVIDERS,
     prepare_provider,
 )
+from review_boundary.repository_task import native_repository_tool_schemas
+from review_boundary.repository_world import validate_tool_arguments as repository_arguments
 
 
 def pricing(tmp_path, provider="openai", models=None, **updates):
@@ -65,7 +69,9 @@ def test_openrouter_defaults_and_nonsecret_metadata():
     }
     assert plan.model_args()["provider"]["allow_fallbacks"] is False
     assert plan.model_args()["max_retries"] == 0
+    assert plan.model_args()["strict_tools"] is False
     assert plan.to_metadata()["remote_price_ceiling_enforced"] is True
+    assert plan.to_metadata()["request_policy"]["strict_tools"] is False
     assert "api_key" not in plan.model_args()
     with pytest.raises(ValueError, match="not included"):
         plan.inspect_model_id("other/model")
@@ -113,6 +119,8 @@ def test_native_worst_quoted_rates_and_provenance(tmp_path, provider):
     assert plan.model_args()["streaming"] is False
     assert plan.model_args()["base_url"] == ENDPOINTS[provider]
     assert "provider" not in plan.model_args()
+    assert "strict_tools" not in plan.model_args()
+    assert "strict_tools" not in metadata["request_policy"]
     assert "max_price" not in json.dumps(plan.model_args())
     with pytest.raises(ValueError, match="input/cache"):
         prepare_provider(provider, ["first"], pricing_file=path, prompt_price_cap=2)
@@ -392,6 +400,201 @@ async def test_real_inspect_sdk_requests_use_native_transport_and_bounds(
             assert body.get("background", False) is False
     finally:
         await model.api.aclose()
+
+
+def strict_schema_violations(schema, path="$"):
+    """Check provider strict-mode requirements on the actual serialized schema."""
+    violations = []
+    if isinstance(schema, dict):
+        if schema.get("type") == "object" or "properties" in schema:
+            properties = schema.get("properties", {})
+            if schema.get("additionalProperties") is not False:
+                violations.append(f"{path}: additionalProperties must be false")
+            if set(schema.get("required", [])) != set(properties):
+                violations.append(f"{path}: every property must be required")
+        for key, value in schema.items():
+            violations.extend(strict_schema_violations(value, f"{path}.{key}"))
+    elif isinstance(schema, list):
+        for index, value in enumerate(schema):
+            violations.extend(strict_schema_violations(value, f"{path}[{index}]"))
+    return violations
+
+
+def request_functions(body, provider, responses_api):
+    if provider == "anthropic":
+        return [
+            {"name": tool["name"], "parameters": tool["input_schema"]} for tool in body["tools"]
+        ]
+    if responses_api:
+        return body["tools"]
+    return [tool["function"] for tool in body["tools"]]
+
+
+@pytest.mark.parametrize(
+    "schema_builder",
+    [native_repository_tool_schemas, native_boundary_tool_schemas],
+    ids=["repository", "boundary"],
+)
+@pytest.mark.parametrize(
+    "provider,model_id,responses_api",
+    [
+        ("openrouter", "openai/gpt-4o-mini", False),
+        ("openrouter", "anthropic/claude-sonnet-4-5", False),
+        ("openai", "gpt-4.1-mini", False),
+        ("openai", "gpt-5-mini", True),
+        ("anthropic", "claude-sonnet-4-5", False),
+    ],
+)
+async def test_native_tool_lists_preserve_optional_parameters_in_real_sdk_requests(
+    tmp_path, isolated_provider_environment, schema_builder, provider, model_id, responses_api
+):
+    plan = plan_for(tmp_path, provider, model_id)
+    schemas = schema_builder()
+    requests = []
+
+    def respond(request):
+        body = json.loads(request.content)
+        requests.append(body)
+        for function in request_functions(body, provider, responses_api):
+            if function.get("strict") is True and strict_schema_violations(function["parameters"]):
+                return httpx2.Response(
+                    400,
+                    json={"error": {"message": "synthetic strict tool schema rejected"}},
+                )
+        return httpx2.Response(200, json=completion_response(provider, model_id, responses_api))
+
+    client = httpx2.AsyncClient(transport=httpx2.MockTransport(respond), trust_env=False)
+    config = GenerateConfig(
+        max_tokens=256, max_retries=0, cache_prompt=False, reasoning_summary="none"
+    )
+    model = get_model(
+        plan.inspect_model_id(model_id),
+        api_key=isolated_provider_environment,
+        config=config,
+        memoize=False,
+        http_client=client,
+        **plan.model_args(),
+    )
+    try:
+        result = await model.api.generate(
+            [ChatMessageUser(content="Read the synthetic pull request.")],
+            [ToolInfo(**schema) for schema in schemas],
+            "auto",
+            config,
+        )
+        output = result[0] if isinstance(result, tuple) else result
+        assert not isinstance(output, Exception), str(output)
+        assert output.message.tool_calls[0].function == "read_pr"
+        assert len(requests) == 1
+        functions = request_functions(requests[0], provider, responses_api)
+        assert [function["name"] for function in functions] == [s["name"] for s in schemas]
+        assert all(function.get("strict") is not True for function in functions)
+        if provider == "openrouter":
+            assert all(function["strict"] is False for function in functions)
+        by_name = {function["name"]: function["parameters"] for function in functions}
+        assert by_name["list_files"].get("required", []) == []
+        assert by_name["list_files"]["properties"]["limit"]["default"] == 20
+        assert by_name["search_files"]["required"] == ["query"]
+        assert by_name["search_files"]["properties"]["case_sensitive"]["default"] is True
+        assert by_name["read_file"]["required"] == ["path", "end_line"]
+        assert by_name["read_file"]["properties"]["start_line"]["default"] == 1
+        evidence = by_name["submit_review"]["properties"]["findings"]["items"]["properties"][
+            "evidence"
+        ]["items"]
+        assert "symbol" not in evidence["required"]
+        assert evidence["additionalProperties"] is False
+        assert {"type": "null"} in evidence["properties"]["symbol"]["anyOf"]
+    finally:
+        await model.api.aclose()
+
+
+@pytest.mark.parametrize(
+    "schema_builder",
+    [native_repository_tool_schemas, native_boundary_tool_schemas],
+    ids=["repository", "boundary"],
+)
+async def test_inspect_default_strict_mode_reproduces_native_tool_schema_rejection(
+    tmp_path, isolated_provider_environment, schema_builder
+):
+    plan = plan_for(tmp_path, "openrouter", "openai/gpt-4o-mini")
+    arguments = plan.model_args()
+    arguments.pop("strict_tools", None)
+    rejected = []
+
+    def respond(request):
+        functions = request_functions(json.loads(request.content), "openrouter", False)
+        rejected.extend(
+            function["name"]
+            for function in functions
+            if function.get("strict") is True and strict_schema_violations(function["parameters"])
+        )
+        if rejected:
+            return httpx2.Response(
+                400,
+                json={"error": {"message": "synthetic strict tool schema rejected"}},
+            )
+        return httpx2.Response(200, json=completion_response("openrouter", "openai/gpt-4o-mini"))
+
+    client = httpx2.AsyncClient(transport=httpx2.MockTransport(respond), trust_env=False)
+    config = GenerateConfig(max_tokens=256, max_retries=0, cache_prompt=False)
+    model = get_model(
+        plan.inspect_model_id("openai/gpt-4o-mini"),
+        api_key=isolated_provider_environment,
+        config=config,
+        memoize=False,
+        http_client=client,
+        **arguments,
+    )
+    try:
+        try:
+            result = await model.api.generate(
+                [ChatMessageUser(content="Read the synthetic pull request.")],
+                [ToolInfo(**schema) for schema in schema_builder()],
+                "auto",
+                config,
+            )
+            failure = result[0] if isinstance(result, tuple) else result
+        except OpenAIStatusError as error:
+            failure = error
+        assert isinstance(failure, OpenAIStatusError)
+        assert failure.status_code == 400
+        assert set(rejected) == {"list_files", "search_files", "read_file", "submit_review"}
+    finally:
+        await model.api.aclose()
+
+
+@pytest.mark.parametrize("validate", [repository_arguments, boundary_arguments])
+def test_world_argument_validation_preserves_defaults_and_rejects_malformed_calls(validate):
+    assert validate("list_files", {}) == {"prefix": "", "cursor": 0, "limit": 20}
+    assert validate("search_files", {"query": "record"}) == {
+        "query": "record",
+        "prefix": "",
+        "cursor": 0,
+        "limit": 20,
+        "case_sensitive": True,
+    }
+    assert validate("read_file", {"path": "src/service.py", "end_line": 2}) == {
+        "path": "src/service.py",
+        "start_line": 1,
+        "end_line": 2,
+    }
+    finding = {
+        "category": "authorization",
+        "summary": "The record lookup crosses the tenant boundary.",
+        "evidence": [
+            {"path": "src/service.py", "start_line": 1, "end_line": 1, "excerpt": "return record"}
+        ],
+    }
+    review = validate("submit_review", {"verdict": "request_changes", "findings": [finding]})
+    assert review["findings"][0]["evidence"][0]["symbol"] is None
+    for name, arguments in [
+        ("list_files", {"cursor": "0"}),
+        ("read_file", {"path": "../outside.py", "end_line": 1}),
+        ("write_file", {"path": "src/service.py"}),
+        ("submit_review", {"verdict": "approve", "findings": [], "ignored": True}),
+    ]:
+        with pytest.raises(ValueError):
+            validate(name, arguments)
 
 
 @pytest.mark.parametrize(
