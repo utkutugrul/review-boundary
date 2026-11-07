@@ -267,6 +267,9 @@
     const section = (title, ...kids) => el("div", "native-section", el("span", "tiny-label", title), ...kids);
     const triTag = (value, yes, no, unknown = "UNKNOWN") => value === true ? tag(yes, "tag-green") : value === false ? tag(no, "tag-red") : tag(unknown, "tag-amber");
     const completionTag = row => !row.completed ? tag("INCOMPLETE", "tag-amber") : row.conclusive === false ? tag("INCONCLUSIVE", "tag-amber") : tag("COMPLETED", "tag-green");
+    const payloadRow = row => !boundary && row.scoring_version === "repository-payload-v1" && row.case_schema_version === 2;
+    const payloadLabel = row => `${nativeText(titleCase(row.payload_ref.entry_id), 64)} · ${titleCase(row.condition)}`;
+    const payloadContext = row => `${nativeText(surfaceName(row.surface), 80)} · ${titleCase(row.condition)}`;
     const clampPage = (key, total) => { view[key] = Math.max(0, Math.min(view[key], Math.ceil(total / NATIVE_PAGE_SIZE) - 1)); return view[key]; };
     const facts = object => {
       const dl = el("dl", "native-dl");
@@ -346,6 +349,8 @@
         const lines = Array.isArray(event.lines) && event.lines.length && event.lines.every(Number.isSafeInteger) ? ` lines ${event.lines.join(", ")}` : "";
         const item = el("li", "", el("span", "tool-number", `[${i}]`), el("span", "", nativeText(event.tool, 80),
           typeof event.path === "string" ? el("span", "tool-path", `${event.path}${lines}`) : null,
+          Array.isArray(event.paths) && event.paths.length ? el("span", "tool-path", `Returned paths: ${event.paths.join(", ")}`) : null,
+          typeof event.response_sha256 === "string" ? el("span", "tool-path", `Response hash (recorded, unchecked): ${nativeText(event.response_sha256, 80)}`) : null,
           typeof event.review_sha256 === "string" ? el("span", "tool-path", `Review submission hash (recorded, unchecked): ${nativeText(event.review_sha256, 80)}`) : null,
           Number.isSafeInteger(sequence) ? el("span", "tool-path", resolved ? `Policy sequence ${sequence}: ${nativeText(linked.decision, 40)}, ${nativeText(linked.result, 40)}` : `Policy sequence ${sequence} (unresolved)`) : null),
           el("span", "tool-status", nativeText(event.status || "recorded", 40)));
@@ -390,12 +395,16 @@
     };
     const detailNode = (index, close) => {
       const row = rows[index];
+      const heading = el("h2", "", payloadRow(row) ? payloadLabel(row) : nativeText(row.case_id, 200));
+      if (payloadRow(row)) heading.setAttribute("title", row.case_id);
       const lines = [line("Run completed", flag(row.completed)), line("Conclusive", flag(row.conclusive)), line("Structural rubric passed", flag(row.rubric_passed)), line("Adjudicated semantic result", flag(row.semantic_passed, "Pass", "Fail")), line("Findings without adjudication", count(row.unknown_findings)), line("Duplicate findings", count(row.duplicate_finding_count)), line("Target issues matched", count(row.target_issues_matched))];
+      if (!boundary && row.scoring_version === "repository-payload-v1") lines.push(line("Carrier", el("span", "", titleCase(row.surface))), line("Condition", el("span", "", titleCase(row.condition))), line("Carrier observed in returned content", flag(row.carrier_observed)), line("Attack payload exposed", flag(row.payload_exposed)));
       if (boundary) lines.push(line("Task utility met", flag(row.task_success)), line("Unauthorized action attempts", count(row.unauthorized_action_attempts, true)), line("Unauthorized virtual effects", count(row.unauthorized_effects, true)), line("Guard blocks", count(row.policy_blocks)), line("Guard escalations", count(row.policy_escalations)), line("Resistance observable", flag(row.resistance_observable)), line("Agent resisted", flag(row.agent_resisted)));
       if (row.review && typeof row.review.verdict === "string") lines.unshift(line("Recorded verdict", el("span", "", titleCase(row.review.verdict))));
       const found = Array.isArray(row.findings) ? row.findings : [];
       return el("section", "panel native-detail",
-        el("div", "pair-heading", el("div", "", el("h2", "", nativeText(row.case_id, 200)), el("span", "row-meta", `${nativeText(row.reviewer ?? "reviewer not recorded", 120)} · trial ${nativeText(row.epoch, 8)}${boundary ? ` · guard ${nativeText(row.guard ?? "not recorded", 40)}` : ""} · sample position ${index}`)), button("text-button", "Close details", close)),
+        el("div", "pair-heading", el("div", "", heading, el("span", "row-meta", `${nativeText(row.reviewer ?? "reviewer not recorded", 120)} · trial ${nativeText(row.epoch, 8)}${boundary ? ` · guard ${nativeText(row.guard ?? "not recorded", 40)}` : ""} · sample position ${index}`)), button("text-button", "Close details", close)),
+        payloadRow(row) ? section("CASE IDENTITY", el("details", "native-snapshot-details", el("summary", "", "Full case identifier"), el("pre", "finding-code", row.case_id))) : null,
         section("RESULTS, COUNTED SEPARATELY", el("div", "metric-list", ...lines), boundary ? el("p", "native-note", "A guard block is the guard's intervention. It is never counted as resistance by the reviewer, and Unknown stays Unknown.") : null),
         row.error !== null ? el("div", "finding bad", el("strong", "", "Run error"), el("p", "", nativeText(row.error, 1000))) : null,
         section("REVIEW-LEVEL ADJUDICATION", adjudicationNode(row.review_adjudication)),
@@ -464,7 +473,7 @@
       const matches = () => {
         const query = stringValue(view.search).toLowerCase();
         return rows.map((row, index) => ({ row, index })).filter(({ row }) => (view.reviewer === "all" || row.reviewer === view.reviewer) && (!boundary || view.guard === "all" || row.guard === view.guard) &&
-          (!query || [row.case_id, row.reviewer, row.family, row.variant, row.surface, boundary ? row.guard : null, row.source_group].some(v => stringValue(v).toLowerCase().includes(query))));
+          (!query || [row.case_id, row.reviewer, row.family, row.variant, row.surface, boundary ? row.guard : null, row.source_group, ...(payloadRow(row) ? [payloadLabel(row), payloadContext(row)] : [])].some(v => stringValue(v).toLowerCase().includes(query))));
       };
       const fill = () => {
         const found = matches(), current = clampPage("pageNum", found.length), shown = found.slice(current * NATIVE_PAGE_SIZE, (current + 1) * NATIVE_PAGE_SIZE);
@@ -476,8 +485,11 @@
           const body = el("tbody", "");
           for (const { row, index } of shown) {
             const open = () => { view.selected = index; fill(); };
-            body.append(el("tr", "", el("td", "", button("row-name", nativeText(familyName(stringValue(row.family) || row.case_id), 120), open), el("span", "row-meta", `${nativeText(row.variant, 80)} · ${nativeText(row.case_id, 120)}`)),
-              el("td", "", el("span", "", nativeText(row.reviewer === undefined ? "not recorded" : modelName(row.reviewer), 120))), el("td", "", nativeText(surfaceName(row.surface), 80)),
+            const label = button("row-name", payloadRow(row) ? payloadLabel(row) : nativeText(familyName(stringValue(row.family) || row.case_id), 120), open);
+            if (payloadRow(row)) label.setAttribute("title", row.case_id);
+            const context = payloadRow(row) ? payloadContext(row) : nativeText(surfaceName(row.surface), 80);
+            body.append(el("tr", "", el("td", "", label, el("span", "row-meta", payloadRow(row) ? `${nativeText(row.variant, 80)} · trial ${nativeText(row.epoch, 8)}` : `${nativeText(row.variant, 80)} · ${nativeText(row.case_id, 120)}`)),
+              el("td", "", el("span", "", nativeText(row.reviewer === undefined ? "not recorded" : modelName(row.reviewer), 120))), el("td", "", context),
               el("td", "", completionTag(row)), el("td", "", triTag(row.rubric_passed, "RUBRIC PASS", "RUBRIC FAIL")), el("td", "", triTag(row.semantic_passed, "ADJUDICATED PASS", "ADJUDICATED FAIL", "UNKNOWN / UNJUDGED")),
               ...(boundary ? [el("td", "", nativeText(row.guard ?? "not recorded", 40)), el("td", "", triTag(row.task_success, "TASK MET", "TASK NOT MET")), el("td", "", count(row.unauthorized_effects, true))] : []),
               el("td", "", button("row-action", "Open", open, `Inspect sample ${index}`))));

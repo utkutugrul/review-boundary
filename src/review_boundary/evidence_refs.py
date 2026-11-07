@@ -13,12 +13,18 @@ from .boundary_world import (
 from .provenance import json_digest
 from .report_validation import MAX_ROWS, DashboardError, _hash, _integer, bounded_json
 from .repository_cases import RepositoryCase, case_digest
+from .repository_cases_v2 import REPOSITORY_PAYLOAD_SCORING_VERSION, RepositoryCaseV2
+from .repository_runtime import (
+    parse_repository_case,
+    restore_repository_world,
+    score_repository_case,
+)
+from .repository_suite import parse_repository_suite
 from .repository_world import (
     RepositoryEvent,
-    RepositoryWorld,
     RepositoryWorldSnapshot,
-    score_repository_world,
 )
+from .repository_world_v2 import RepositoryEventV2, RepositoryWorldSnapshotV2
 
 EvidenceReferenceError = DashboardError
 SNAPSHOT_BINDING_VERSION = 1
@@ -189,7 +195,12 @@ def create_snapshot_binding(native_report, row_index, snapshot) -> dict:
     bounded_json(snapshot)
     if type(snapshot) is not dict or type(snapshot.get("schema_version")) is not int:
         raise EvidenceReferenceError("Snapshot requires an exact integer schema version")
-    if snapshot["schema_version"] != 1:
+    expected_version = (
+        2
+        if kind == "repository" and row["scoring_version"] == REPOSITORY_PAYLOAD_SCORING_VERSION
+        else 1
+    )
+    if snapshot["schema_version"] != expected_version:
         raise EvidenceReferenceError("Cannot create a reference for an unsupported snapshot")
     binding = {
         "schema_version": SNAPSHOT_BINDING_VERSION,
@@ -221,6 +232,14 @@ def _supplied_cases(suite, kind):
     if suite is None:
         return None
     model = RepositoryCase if kind == "repository" else BoundaryCase
+    if kind == "repository" and type(suite) is dict:
+        try:
+            bounded_json(suite)
+            return parse_repository_suite(suite).cases
+        except (ValueError, TypeError, UnicodeError, RecursionError, OverflowError):
+            raise EvidenceReferenceError(
+                "Supplied suite contains an invalid bounded case"
+            ) from None
     if type(suite) is dict:
         bounded_json(suite)
         if (
@@ -238,13 +257,17 @@ def _supplied_cases(suite, kind):
 
     try:
         cases = tuple(
-            value
+            parse_repository_case(value)
+            if kind == "repository"
+            else value
             if isinstance(value, model)
             else model.model_validate_json(json.dumps(value, allow_nan=False))
             for value in values
         )
     except (ValueError, TypeError, UnicodeError, RecursionError, OverflowError):
         raise EvidenceReferenceError("Supplied suite contains an invalid bounded case") from None
+    if kind == "repository" and len({isinstance(case, RepositoryCaseV2) for case in cases}) != 1:
+        raise EvidenceReferenceError("Supplied repository suite mixes case versions")
     digest = case_digest if kind == "repository" else boundary_case_digest
     if len({digest(case) for case in cases}) != len(cases):
         raise EvidenceReferenceError("Supplied suite contains duplicate immutable cases")
@@ -254,7 +277,13 @@ def _supplied_cases(suite, kind):
 def _snapshot_model(snapshot, kind):
     import json
 
-    model = RepositoryWorldSnapshot if kind == "repository" else BoundaryWorldSnapshot
+    model = (
+        RepositoryWorldSnapshotV2
+        if kind == "repository" and snapshot.get("schema_version") == 2
+        else RepositoryWorldSnapshot
+        if kind == "repository"
+        else BoundaryWorldSnapshot
+    )
     try:
         return model.model_validate_json(json.dumps(snapshot, allow_nan=False))
     except (ValueError, TypeError, UnicodeError, RecursionError, OverflowError):
@@ -273,6 +302,8 @@ def _matching_observations(row, snapshot, kind):
     }
     if kind == "boundary":
         fields.update(action_request_read="action_request_read")
+    elif row["scoring_version"] == REPOSITORY_PAYLOAD_SCORING_VERSION:
+        fields.update(carrier_observed="carrier_observed")
     if any(
         _digest(row[field]) != _digest(snapshot[snapshot_field])
         for field, snapshot_field in fields.items()
@@ -280,7 +311,13 @@ def _matching_observations(row, snapshot, kind):
         return False
     import json
 
-    event_model = BoundaryEvent if kind == "boundary" else RepositoryEvent
+    event_model = (
+        BoundaryEvent
+        if kind == "boundary"
+        else RepositoryEventV2
+        if row["scoring_version"] == REPOSITORY_PAYLOAD_SCORING_VERSION
+        else RepositoryEvent
+    )
     normalize = lambda model, values: [
         model.model_validate_json(json.dumps(value, allow_nan=False)).model_dump(mode="json")
         for value in values
@@ -311,8 +348,8 @@ def _matching_observations(row, snapshot, kind):
 
 def _restored_observations_match(row, case, snapshot, kind):
     if kind == "repository":
-        world = RepositoryWorld.from_snapshot(case, snapshot, expected_limits=snapshot["limits"])
-        observed = score_repository_world(case, world)
+        world = restore_repository_world(case, snapshot, expected_limits=snapshot["limits"])
+        observed = score_repository_case(case, world)
     else:
         world = BoundaryWorld.from_snapshot(
             case, snapshot, expected_limits=snapshot["limits"], expected_guard=row["guard"]
@@ -360,6 +397,13 @@ def verify_snapshot_bindings(native_report, bindings, *, snapshots, suite=None) 
     for key in snapshots:
         _hash(key)
     cases = _supplied_cases(suite, kind) if kind != "legacy" else None
+    if kind == "repository" and cases:
+        payload_cases = isinstance(cases[0], RepositoryCaseV2)
+        payload_report = (
+            native_report["metadata"].get("scoring_version") == REPOSITORY_PAYLOAD_SCORING_VERSION
+        )
+        if payload_cases != payload_report:
+            raise EvidenceReferenceError("Supplied repository suite and report versions disagree")
     if kind == "legacy" and suite is not None:
         raise EvidenceReferenceError("A native case suite cannot verify a legacy report")
     report_digest = _digest(native_report)
@@ -414,7 +458,12 @@ def verify_snapshot_bindings(native_report, bindings, *, snapshots, suite=None) 
                 reason="external_policy_has_no_snapshot_restore_contract",
             )
             continue
-        if binding["snapshot_version"] != 1:
+        expected_version = (
+            2
+            if kind == "repository" and row["scoring_version"] == REPOSITORY_PAYLOAD_SCORING_VERSION
+            else 1
+        )
+        if binding["snapshot_version"] != expected_version:
             result.update(status="unsupported_version", reason="unsupported_snapshot_version")
             continue
         snapshot = snapshots.get(binding["snapshot_sha256"])
@@ -427,7 +476,7 @@ def verify_snapshot_bindings(native_report, bindings, *, snapshots, suite=None) 
         if type(snapshot.get("schema_version")) is not int:
             result["reason"] = "invalid_snapshot_version"
             continue
-        if snapshot["schema_version"] != 1:
+        if snapshot["schema_version"] != expected_version:
             result.update(status="unsupported_version", reason="unsupported_snapshot_version")
             continue
         if snapshot["schema_version"] != binding["snapshot_version"]:

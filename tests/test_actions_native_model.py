@@ -380,5 +380,11 @@ def test_existing_test_workflow_runs_every_browser_suite_without_live_providers(
         if step.get("name") == "Check browser data handling"
     )
     assert browser["run"] == "node --test tests/web/*.test.cjs"
-    assert len(list((ROOT / "tests/web").glob("*.test.cjs"))) == 4
+    assert {path.name for path in (ROOT / "tests/web").glob("*.test.cjs")} == {
+        "adjudication.test.cjs",
+        "dashboard.test.cjs",
+        "native-dashboard.test.cjs",
+        "payload-report.test.cjs",
+        "report-contracts.test.cjs",
+    }
     assert "evaluate-native-model.yml" not in str(value)

@@ -19,10 +19,16 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from .provenance import experiment_provenance, json_digest
 from .repository_cases import RepositoryCase, case_digest, utf8_size, virtual_path
+from .repository_cases_v2 import REPOSITORY_PAYLOAD_SCORING_VERSION, RepositoryCaseV2
+from .repository_runtime import (
+    parse_repository_case,
+    repository_world_for_case,
+    restore_repository_world,
+    score_repository_case,
+)
 from .repository_world import (
     RepositoryLimits,
     RepositoryWorld,
-    score_repository_world,
 )
 
 
@@ -69,7 +75,7 @@ class RepositoryToolFinding(BaseModel):
 
 
 def _case(value) -> RepositoryCase:
-    return RepositoryCase.model_validate_json(json.dumps(value, allow_nan=False))
+    return parse_repository_case(value)
 
 
 def context() -> tuple[RepositoryCase, RepositoryWorld]:
@@ -77,7 +83,7 @@ def context() -> tuple[RepositoryCase, RepositoryWorld]:
     expected_limits = RepositoryLimits.model_validate_json(
         json.dumps(store().get("repository_limits"), allow_nan=False)
     )
-    world = RepositoryWorld.from_snapshot(
+    world = restore_repository_world(
         selected,
         store().get("repository_world"),
         expected_limits=expected_limits,
@@ -232,7 +238,7 @@ def initialize_repository(limits: RepositoryLimits):
         selected = _case(state.metadata["case"])
         state.store.set("repository_case", selected.model_dump(mode="json"))
         state.store.set("repository_limits", limits.model_dump(mode="json"))
-        state.store.set("repository_world", RepositoryWorld(selected, limits).snapshot())
+        state.store.set("repository_world", repository_world_for_case(selected, limits).snapshot())
         return state
 
     return solve
@@ -291,9 +297,9 @@ def repository_review_score(limits: RepositoryLimits):
         selected = _case(state.metadata["case"])
         snapshot = state.store.get("repository_world")
         world = (
-            RepositoryWorld.from_snapshot(selected, snapshot, expected_limits=limits)
+            restore_repository_world(selected, snapshot, expected_limits=limits)
             if snapshot is not None
-            else RepositoryWorld(selected, limits)
+            else repository_world_for_case(selected, limits)
         )
         write_requests = sum(
             call.function == "write_file"
@@ -301,7 +307,7 @@ def repository_review_score(limits: RepositoryLimits):
             if isinstance(message, ChatMessageAssistant)
             for call in message.tool_calls or []
         )
-        result = score_repository_world(selected, world, write_requests=write_requests)
+        result = score_repository_case(selected, world, write_requests=write_requests)
         result["stop_reason"] = state.store.get("stop_reason")
         return Score(
             value={
@@ -323,7 +329,7 @@ def repository_review_score(limits: RepositoryLimits):
 @task
 def repository_review_task(
     *,
-    cases: list[RepositoryCase] | tuple[RepositoryCase, ...],
+    cases: list[RepositoryCase | RepositoryCaseV2] | tuple[RepositoryCase | RepositoryCaseV2, ...],
     limits: RepositoryLimits | None = None,
     max_turns: int = 8,
     max_input_bytes: int = 24000,
@@ -338,7 +344,10 @@ def repository_review_task(
         or not 128 <= max_output_tokens <= 8192
     ):
         raise ValueError("Invalid repository execution bounds")
-    selected = tuple(cases)
+    selected = tuple(parse_repository_case(case) for case in cases)
+    versions = {isinstance(case, RepositoryCaseV2) for case in selected}
+    if len(versions) != 1:
+        raise ValueError("Repository tasks require homogeneous case versions")
     if len({case.case_id for case in selected}) != len(selected):
         raise ValueError("Repository task case IDs must be unique")
     world_limits = limits or RepositoryLimits()
@@ -363,7 +372,9 @@ def repository_review_task(
         ],
         scorer=repository_review_score(world_limits),
         name="repository_review",
-        version="repository-v1",
+        version=REPOSITORY_PAYLOAD_SCORING_VERSION
+        if isinstance(selected[0], RepositoryCaseV2)
+        else "repository-v1",
         config=GenerateConfig(
             max_tokens=max_output_tokens,
             max_retries=0,
@@ -372,6 +383,16 @@ def repository_review_task(
             reasoning_summary=reasoning_summary,
         ),
         metadata={
+            **(
+                {
+                    "case_schema_version": 2,
+                    "suite_schema_version": 2,
+                    "scoring_version": REPOSITORY_PAYLOAD_SCORING_VERSION,
+                    "corpus_version": "repository-payload-suite-v1",
+                }
+                if isinstance(selected[0], RepositoryCaseV2)
+                else {}
+            ),
             "suite_sha256": json_digest([case_digest(case) for case in selected]),
             "world_limits": world_limits.model_dump(mode="json"),
             "max_turns": max_turns,

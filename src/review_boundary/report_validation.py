@@ -5,12 +5,15 @@ import math
 import re
 
 from .boundary_world import BoundaryEffect, BoundaryEvent, BoundaryPolicyTrace
+from .payload_packs import PayloadRef
+from .repository_cases_v2 import REPOSITORY_PAYLOAD_SCORING_VERSION
 from .repository_world import (
     FindingAdjudication,
     RepositoryEvent,
     RepositoryReview,
     ReviewAdjudication,
 )
+from .repository_world_v2 import RepositoryEventV2
 
 MAX_JSON_NODES = 200_000
 SHA256 = re.compile(r"[0-9a-f]{64}\Z")
@@ -421,6 +424,26 @@ def _native_row(row: dict, kind: str) -> None:
         raise DashboardError("Native report rows must be objects")
     for field in REPOSITORY_STRINGS:
         _string(row.get(field), "Native report field", nonempty=True)
+    payload = kind == "repository" and row["scoring_version"] == REPOSITORY_PAYLOAD_SCORING_VERSION
+    if (
+        kind == "repository"
+        and not payload
+        and any(key in row for key in ("case_schema_version", "payload_ref", "carrier_observed"))
+    ):
+        raise DashboardError("Repository payload fields require their explicit scoring version")
+    if payload:
+        if type(row.get("case_schema_version")) is not int or row["case_schema_version"] != 2:
+            raise DashboardError("Repository payload rows require exact case schema version 2")
+        ref = _model(PayloadRef, row.get("payload_ref"))
+        _boolean(row.get("carrier_observed"))
+        if row.get("condition") not in ("clean", "attack", "benign_quote"):
+            raise DashboardError("Unsupported repository payload condition")
+        if ref.carrier != row["surface"] or ref.condition != row["condition"]:
+            raise DashboardError("Repository payload identity disagrees with its reference")
+        if row.get("payload_exposed") != (row["condition"] == "attack" and row["carrier_observed"]):
+            raise DashboardError("Repository payload exposure disagrees with carrier delivery")
+        if row.get("conclusive") and not row["carrier_observed"]:
+            raise DashboardError("Repository payload conclusions require carrier delivery")
     _hash(row.get("case_sha256"))
     _integer(row.get("epoch"), "Native report epoch", minimum=1)
     for field in REPOSITORY_BOOLEANS:
@@ -526,9 +549,22 @@ def _native_row(row: dict, kind: str) -> None:
     events = row.get("events")
     if type(events) is not list or len(events) > MAX_EVENTS_PER_ROW:
         raise DashboardError("Native event trace exceeds its bound")
-    parsed_events = [
-        _model(BoundaryEvent if kind == "boundary" else RepositoryEvent, event) for event in events
-    ]
+    event_model = (
+        BoundaryEvent if kind == "boundary" else RepositoryEventV2 if payload else RepositoryEvent
+    )
+    parsed_events = [_model(event_model, event) for event in events]
+    if payload:
+        sizes = [len((event.arguments_json or "").encode("utf-8")) for event in parsed_events]
+        limits = [index for index, event in enumerate(parsed_events) if event.tool == "limits"]
+        if limits and limits != [len(events) - 1]:
+            raise DashboardError("Repository payload limits must terminate the trace")
+        total = sum(sizes)
+        terminal = parsed_events[-1].status if limits else None
+        if total > 1048576:
+            if terminal not in ("trace_bytes", "calls") or total - sizes[-1] > 1048576:
+                raise DashboardError("Repository payload arguments exceed the trace bound")
+        elif terminal == "trace_bytes":
+            raise DashboardError("Repository payload trace limit requires an argument overflow")
     if row["tool_calls"] != len(events) or row["output_bytes"] != sum(
         e.response_bytes for e in parsed_events
     ):

@@ -13,6 +13,7 @@ from pydantic import Field, field_validator, model_validator
 
 from .json_input import read_json_object
 from .repository_cases import FrozenModel, RepositoryCase
+from .repository_cases_v2 import RepositoryCaseV2
 
 MAX_REPOSITORY_SUITE_CASES = 32
 
@@ -36,7 +37,25 @@ class RepositorySuite(FrozenModel):
         return self
 
 
-def parse_repository_suite(value: dict) -> RepositorySuite:
+class RepositorySuiteV2(FrozenModel):
+    schema_version: Literal[2]
+    cases: tuple[RepositoryCaseV2, ...] = Field(min_length=1, max_length=MAX_REPOSITORY_SUITE_CASES)
+
+    @field_validator("schema_version", mode="before")
+    @classmethod
+    def exact_integer_version(cls, value: Any) -> Any:
+        if type(value) is not int or value != 2:
+            raise ValueError("schema_version must be the exact integer 2")
+        return value
+
+    @model_validator(mode="after")
+    def unique_case_ids(self):
+        if len({case.case_id for case in self.cases}) != len(self.cases):
+            raise ValueError("Repository case IDs must be unique")
+        return self
+
+
+def parse_repository_suite(value: dict) -> RepositorySuite | RepositorySuiteV2:
     """Validate an already-decoded JSON object, preserving strict runtime types.
 
     The value is re-encoded as JSON text so lists become tuples under strict validation
@@ -44,20 +63,26 @@ def parse_repository_suite(value: dict) -> RepositorySuite:
     """
     if not isinstance(value, dict):
         raise ValueError("Repository suites must be JSON objects")  # noqa: TRY004
+    version = value.get("schema_version")
+    if type(version) is not int or version not in (1, 2):
+        raise ValueError("Unsupported repository suite schema version")
     try:
         raw = json.dumps(value, allow_nan=False)
     except (TypeError, RecursionError) as exc:
         raise ValueError("Repository suites must contain only JSON values") from exc
     except ValueError as exc:
         raise ValueError("Repository suites must contain only finite JSON values") from exc
-    return RepositorySuite.model_validate_json(raw)
+    model = RepositorySuiteV2 if version == 2 else RepositorySuite
+    return model.model_validate_json(raw)
 
 
-def load_repository_suite(path: Path) -> RepositorySuite:
+def load_repository_suite(path: Path) -> RepositorySuite | RepositorySuiteV2:
     """Read a bounded suite file with the safe JSON parser, then validate it."""
     return parse_repository_suite(read_json_object(path))
 
 
-def repository_suite_schema() -> dict:
+def repository_suite_schema(*, schema_version: int = 1) -> dict:
     """Public JSON Schema derived from the model graph; cross-field checks stay in Python."""
-    return RepositorySuite.model_json_schema()
+    if type(schema_version) is not int or schema_version not in (1, 2):
+        raise ValueError("Unsupported repository suite schema version")
+    return (RepositorySuiteV2 if schema_version == 2 else RepositorySuite).model_json_schema()

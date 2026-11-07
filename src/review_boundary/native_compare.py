@@ -35,6 +35,9 @@ from .provenance import json_digest, text_digest, validate_provenance
 from .report_contract import detect_contract, unwrap_report
 from .report_validation import MAX_ROWS, SHA256, bounded_json
 from .repository_cases import RepositoryCase, case_digest
+from .repository_cases_v2 import REPOSITORY_PAYLOAD_SCORING_VERSION, RepositoryCaseV2
+from .repository_runtime import parse_repository_case
+from .repository_suite import parse_repository_suite
 from .repository_world import RepositoryLimits
 
 COMPARISON_SCHEMA_VERSION = 1
@@ -179,7 +182,10 @@ def _suite_cases(suite: Any, kind: str) -> tuple | None:
             raise ComparisonError("Supplied expected suite exceeds its JSON bounds") from None
         if set(suite) != {"schema_version", "cases"} or type(suite["schema_version"]) is not int:
             raise ComparisonError("Supplied expected suite has an unsupported contract")
-        if suite["schema_version"] != 1 or type(suite["cases"]) is not list:
+        if (
+            suite["schema_version"] not in ((1, 2) if kind == "repository" else (1,))
+            or type(suite["cases"]) is not list
+        ):
             raise ComparisonError("Supplied expected suite has an unsupported contract")
         values = suite["cases"]
     else:
@@ -189,10 +195,20 @@ def _suite_cases(suite: Any, kind: str) -> tuple | None:
     model = RepositoryCase if kind == "repository" else BoundaryCase
     try:
         plain = [
-            value.model_dump(mode="json") if type(value) is model else value for value in values
+            value.model_dump(mode="json") if isinstance(value, (model, RepositoryCaseV2)) else value
+            for value in values
         ]
         bounded_json(plain)
-        cases = tuple(model.model_validate_json(_canonical(value)) for value in plain)
+        if kind == "repository":
+            cases = (
+                parse_repository_suite(suite).cases
+                if type(suite) is dict
+                else tuple(parse_repository_case(value) for value in plain)
+            )
+            if len({isinstance(case, RepositoryCaseV2) for case in cases}) != 1:
+                raise ValueError("Repository suites require homogeneous case versions")
+        else:
+            cases = tuple(model.model_validate_json(_canonical(value)) for value in plain)
     except (ValueError, TypeError, UnicodeError, OverflowError, RecursionError):
         raise ComparisonError("Supplied expected suite contains an invalid bounded case") from None
     digest = case_digest if kind == "repository" else boundary_case_digest
@@ -240,7 +256,11 @@ def _calibration_transport_inapplicable(
         else {"reference", "gullible", "overblocking"}
     )
     protocol = (
-        "reviewboundary.repository-jsonl/1"
+        (
+            "reviewboundary.repository-jsonl/2"
+            if left["scoring_version"] == REPOSITORY_PAYLOAD_SCORING_VERSION
+            else "reviewboundary.repository-jsonl/1"
+        )
         if before.kind == "repository"
         else "reviewboundary.boundary-jsonl/1"
     )
@@ -272,6 +292,11 @@ def _calibration_transport_inapplicable(
 
 def _bind_suite(report: dict, kind: str, cases: tuple, method: str, label: str) -> set[str]:
     metadata = report["metadata"]
+    if kind == "repository" and (
+        isinstance(cases[0], RepositoryCaseV2)
+        != (metadata["scoring_version"] == REPOSITORY_PAYLOAD_SCORING_VERSION)
+    ):
+        raise ComparisonError(f"{label} supplied repository suite and report versions disagree")
     digest = case_digest if kind == "repository" else boundary_case_digest
     digests = [digest(case) for case in cases]
     raw = (
@@ -303,6 +328,12 @@ def _bind_suite(report: dict, kind: str, cases: tuple, method: str, label: str) 
             ),
         }
         request = _request(case, kind)
+        if kind == "repository" and isinstance(case, RepositoryCaseV2):
+            identity.update(
+                case_schema_version=2,
+                condition=case.condition,
+                payload_ref=case.payload_ref.model_dump(mode="json"),
+            )
         if kind == "boundary":
             identity.update(
                 family=case.family,
@@ -472,7 +503,13 @@ def _read_native(document: dict, kind: str, cases: tuple | None, label: str) -> 
         )
     seen_cases: dict[str, tuple] = {}
     seen_names: dict[str, str] = {}
-    fields = CASE_FIELDS + (BOUNDARY_CASE_FIELDS if kind == "boundary" else ())
+    fields = CASE_FIELDS + (
+        BOUNDARY_CASE_FIELDS
+        if kind == "boundary"
+        else ("case_schema_version", "condition", "payload_ref")
+        if metadata["scoring_version"] == REPOSITORY_PAYLOAD_SCORING_VERSION
+        else ()
+    )
     for row in rows:
         if _group(row, kind) not in expected or _key(row, kind) not in expected[_group(row, kind)]:
             raise ComparisonError(f"{label} contains an undeclared native sample")

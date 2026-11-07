@@ -27,6 +27,10 @@ file paths and URLs, actions aimed at the wrong destination, vague permission, a
 instructions to hide findings. Each has a normal-use control. Compare a guard on
 and off while tracking attempted actions, blocked actions, and review quality separately.
 
+[Payload packs](docs/payload-packs.md) add matched examples in README text, pull requests,
+filenames, comments, notes, and tool responses. Worker-summary examples test whether
+a generated claim of user approval is mistaken for actual permission.
+
 ## Try the free demo
 
 Install Git, Python 3.11+, and [uv](https://docs.astral.sh/uv/), then run:

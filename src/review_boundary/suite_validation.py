@@ -219,7 +219,12 @@ def _require_local_refs(node, depth: int = 0) -> None:
 
 def _run_schema(layer: _Layer, data: dict) -> None:
     try:
-        schema = repository_suite_schema()
+        version = data.get("schema_version", 1)
+        schema = (
+            repository_suite_schema()
+            if type(version) is int and version == 1
+            else repository_suite_schema(schema_version=version)
+        )
         _require_local_refs(schema)
         jsonschema.Draft202012Validator.check_schema(schema)
         validator = jsonschema.Draft202012Validator(schema)
@@ -308,6 +313,9 @@ def _check_leakage(layer: _Layer, suite, manifests: list, incomplete: bool) -> N
         add("oracle_identifier", manifest.oracle.sha256)
     for index, case in enumerate(suite.cases):
         texts = [("instructions", case.instructions), ("task", case.task), ("pr", case.pr)]
+        untrusted_text = getattr(case.exposure, "untrusted_text", None)
+        if untrusted_text is not None:
+            texts.append(("exposure.untrusted_text", untrusted_text))
         for number, file in enumerate(case.files):
             for rule in _carrier_rules(file.path):
                 layer.fail(f"case {index}: files[{number}].path matches the {rule} carrier rule.")
@@ -777,7 +785,9 @@ def validate_suite_command(args) -> int:
 
 def suite_schema_command(args) -> int:
     output = None if args.output is None else _new_output_path(args.output)
-    written = _emit(repository_suite_schema(), output)
+    written = _emit(
+        repository_suite_schema(schema_version=getattr(args, "schema_version", 1)), output
+    )
     if written is not None:
         print("Suite schema: " + str(written))
     return 0
