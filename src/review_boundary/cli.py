@@ -18,6 +18,7 @@ from inspect_ai.log import read_eval_log
 
 from .budget import api_get, model_snapshot, planned_cost, reserve, settle
 from .cases import FAMILIES, SURFACES, build_cases, suite_digest
+from .corpus_registry import corpus_names
 from .model_safety import ProviderRequestError, guarded_model
 from .providers import prepare_provider
 from .report import rows_from_logs, summarize, write_report
@@ -30,10 +31,34 @@ def parser():
     )
     commands = root.add_subparsers(dest="command", required=True)
     commands.add_parser("list", help="List the synthetic case IDs")
+    case_template = commands.add_parser(
+        "case-template", help="Create a complete original suite contribution template"
+    )
+    case_template.add_argument("--output", type=Path, required=True, help="New directory")
+    case_template.add_argument("--name", default="example", help="Lowercase slug for the case")
     corpus = commands.add_parser("corpus-export", help="Export pinned upstream review cases")
-    corpus.add_argument("--corpus", choices=("pyjwt",), required=True)
+    corpus.add_argument("--corpus", choices=corpus_names(), required=True)
     corpus.add_argument("--output", type=Path, required=True)
     corpus.add_argument("--verify", action="store_true", help="Run offline behavior checks")
+    validate = commands.add_parser(
+        "validate-suite", help="Validate an evaluator-only repository suite without running models"
+    )
+    validate.add_argument("--suite", type=Path, required=True)
+    validate.add_argument("--manifest", type=Path, action="append", help="Repeatable metadata file")
+    validate.add_argument("--splits", type=Path, help="Strict source group split assignment")
+    validate.add_argument("--corpus", choices=corpus_names(), help="Bind to a registered corpus")
+    validate.add_argument("--verify", action="store_true", help="Run the bound bundled oracle")
+    validate.add_argument(
+        "--check-package", action="store_true", help="Check installed bundled fixtures"
+    )
+    validate.add_argument(
+        "--schema-only", action="store_true", help="Run only safe JSON, schema and runtime layers"
+    )
+    validate.add_argument("--output", type=Path, help="New JSON result file")
+    suite_schema = commands.add_parser(
+        "suite-schema", help="Print the JSON Schema derived from the repository suite model"
+    )
+    suite_schema.add_argument("--output", type=Path, help="New JSON file")
     for name in ("boundary-demo", "boundary-run-adapter"):
         command = commands.add_parser(name, help="Compare virtual actions with and without a guard")
         command.add_argument("--output", type=Path, required=True)
@@ -573,10 +598,22 @@ def main(argv=None):
         if args.command == "list":
             print("\n".join(c.id for c in build_cases()))
             return 0
+        if args.command == "case-template":
+            from .suite_contribution import case_template_command
+
+            return case_template_command(args)
         if args.command == "corpus-export":
             from .upstream_runner import export_upstream
 
             return export_upstream(args)
+        if args.command == "validate-suite":
+            from .suite_validation import validate_suite_command
+
+            return validate_suite_command(args)
+        if args.command == "suite-schema":
+            from .suite_validation import suite_schema_command
+
+            return suite_schema_command(args)
         if args.command in ("boundary-demo", "boundary-run-adapter", "boundary-run-model"):
             from .boundary_runner import run_boundary_command, run_boundary_model
 

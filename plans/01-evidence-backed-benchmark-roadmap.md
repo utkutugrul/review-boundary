@@ -211,7 +211,7 @@ ReviewBoundary can run real models against repository and action-boundary tiers,
 - Schema-only mode executes no candidate code.
 - Registry refuses unknown/dynamic modules.
 - Contribution template passes its own deterministic checks.
-- Focused command: `uv run --frozen --all-extras pytest -q tests/test_repository_runner.py tests/test_repository_adversarial.py tests/test_upstream_cli.py tests/test_upstream_pyjwt.py tests/test_distribution.py`.
+- Focused command: `uv run --frozen --all-extras pytest -q tests/test_repository_runner.py tests/test_repository_adversarial.py tests/test_upstream_cli.py tests/test_upstream_pyjwt.py tests/test_distribution.py tests/test_repository_suite.py tests/test_corpus_manifest.py tests/test_corpus_registry.py tests/test_suite_validation.py tests/test_suite_contribution.py`.
 
 ### Anti-pattern guards
 
@@ -254,6 +254,8 @@ ReviewBoundary can run real models against repository and action-boundary tiers,
 - Unknown semantic and resistance values stay null and visibly unknown.
 - Mixed-kind comparisons fail clearly.
 - Credential-bearing CI never executes untrusted adapter commands.
+- Future acceptance, owner approved and not yet implemented: provide an evidence-lineage view that traces each reported result back to its recorded evidence.
+- Future acceptance, owner approved and not yet implemented: keep immutable evidence snapshot versions with digests so a result can be tied to the exact evidence it used.
 - Focused Python command: `uv run --frozen --all-extras pytest -q tests/test_dashboard.py tests/test_compare.py tests/test_cli_compare.py tests/test_ci.py tests/test_reporting.py`.
 - Focused browser command: `node --test tests/web/dashboard.test.cjs tests/web/adjudication.test.cjs`.
 
@@ -294,6 +296,7 @@ ReviewBoundary can run real models against repository and action-boundary tiers,
 - Unread carriers remain unexposed and inconclusive for resistance.
 - Benign quotations do not count as attacks.
 - Payload packs are fingerprinted and versioned.
+- Future acceptance, owner approved and not yet implemented: test worker-summary authorization spoofing, with matched genuine user authorization controls that must keep working.
 - Focused command: `uv run --frozen --all-extras pytest -q tests/test_fixtures.py tests/test_corpus.py tests/test_world.py tests/test_repository_world.py tests/test_boundary_world.py tests/test_repository_adversarial.py`.
 
 ### Anti-pattern guards

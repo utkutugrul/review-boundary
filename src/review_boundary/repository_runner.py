@@ -24,7 +24,6 @@ from .budget import (
     reserve,
     settle,
 )
-from .json_input import read_json_object
 from .model_safety import ProviderRequestError, guarded_model
 from .provenance import experiment_provenance, json_digest
 from .providers import prepare_provider
@@ -35,6 +34,7 @@ from .repository_cases import (
     build_repository_demo_cases,
     case_digest,
 )
+from .repository_suite import load_repository_suite
 from .repository_world import (
     RepositoryLimits,
     RepositoryWorld,
@@ -53,17 +53,7 @@ def repository_profile() -> AdapterProfile:
 def load_suite(path: Path | None) -> tuple[RepositoryCase, ...]:
     if path is None:
         return build_repository_demo_cases()
-    value = read_json_object(path)
-    if set(value) != {"schema_version", "cases"} or type(value["schema_version"]) is not int:
-        raise ValueError("Repository suites require schema_version and cases only")
-    if value["schema_version"] != 1 or not isinstance(value["cases"], list):
-        raise ValueError("Unsupported repository suite schema")
-    if not 1 <= len(value["cases"]) <= 32:
-        raise ValueError("Repository suites require one to 32 cases")
-    cases = tuple(RepositoryCase.model_validate_json(json.dumps(case)) for case in value["cases"])
-    if len({case.case_id for case in cases}) != len(cases):
-        raise ValueError("Repository case IDs must be unique")
-    return cases
+    return load_repository_suite(path).cases
 
 
 def _logged_case(value) -> RepositoryCase:

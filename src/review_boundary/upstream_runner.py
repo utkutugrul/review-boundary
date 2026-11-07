@@ -3,32 +3,29 @@
 import json
 from datetime import UTC, datetime
 
-from .corpus_upstream_pyjwt import (
-    UPSTREAM_CORPUS_VERSION,
-    build_upstream_pyjwt_cases,
-    reproduce_upstream_pyjwt,
-    source_manifest,
-)
+from .corpus_registry import get_corpus
 from .provenance import experiment_provenance, json_digest
 from .repository_runner import PROTOCOL
+from .repository_suite import RepositorySuite
 from .repository_world import tool_schemas
 
 
 def export_upstream(args) -> int:
-    if args.corpus != "pyjwt":
-        raise ValueError("Unknown upstream corpus")
+    corpus = get_corpus(args.corpus)
     output = args.output
     if output.exists() and (not output.is_dir() or any(output.iterdir())):
         raise ValueError("Corpus output must be a new or empty directory")
-    source = source_manifest()
-    cases = build_upstream_pyjwt_cases()
-    suite = {"schema_version": 1, "cases": [case.model_dump(mode="json") for case in cases]}
-    verification = reproduce_upstream_pyjwt() if args.verify else None
+    source = corpus.source_manifest()
+    cases = corpus.build_cases()
+    evaluator = corpus.evaluator_manifest()
+    suite = RepositorySuite(schema_version=1, cases=cases).model_dump(mode="json")
+    verification = corpus.verify_behavior() if args.verify else None
     metadata = {
         "schema_version": 1,
-        "corpus_version": UPSTREAM_CORPUS_VERSION,
+        "corpus_version": corpus.corpus_version,
         "generated_at": datetime.now(UTC).isoformat(),
         "suite_sha256": json_digest(suite),
+        "evaluator_manifest_sha256": json_digest(evaluator),
         "case_count": len(cases),
         "source_issue_count": len({case.source_group for case in cases}),
         "source": source,
@@ -48,10 +45,14 @@ def export_upstream(args) -> int:
         else "passed"
         if verification["reproduced"]
         else "failed",
-        "scope": "Complete pinned jwt package. Four conditions from one public source issue.",
+        "scope": corpus.scope,
     }
     output.mkdir(parents=True, exist_ok=True)
-    for filename, value in (("suite.json", suite), ("provenance.json", metadata)):
+    for filename, value in (
+        ("suite.json", suite),
+        ("provenance.json", metadata),
+        ("evaluator_manifest.json", evaluator),
+    ):
         (output / filename).write_text(json.dumps(value, indent=2, ensure_ascii=False) + "\n")
     if verification is not None:
         (output / "verification.json").write_text(json.dumps(verification, indent=2) + "\n")

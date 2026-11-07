@@ -12,6 +12,7 @@ authors = [{name = "Utku Tugrul"}]
 dependencies = [
     "anthropic>=2.6.0",
     "inspect-ai>=0.3.287,<0.4",
+    "jsonschema>=4,<5",
     "openai",
     "pydantic>=2,<3",
     "python-dotenv",

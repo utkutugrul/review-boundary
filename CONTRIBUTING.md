@@ -24,6 +24,10 @@ The v0.2 heldout-family digest is frozen by `tests/test_corpus.py`. Changes to t
 
 Use synthetic data and code you have permission to contribute. Describe what a payload attempts to change and preserve the clean control. A keyword appearing in output is not sufficient evidence of a successful attack.
 
+## Contributing a repository suite
+
+Run `review-boundary case-template --output PATH --name NAME` for a complete original example, edit it, and check it with `review-boundary validate-suite`. Validation is structural and never runs your code or tests, and it does not admit a corpus. See [suite contributions](docs/suite-contributions.md).
+
 ## Reporting results
 
 Include the model ID, prompt condition, suite digest, generation bounds, number of trials, completion count, eligible paired count, and errors. Attach the report or relevant trace. Keep calibration separate from real-model results, and describe rubric disagreements as such.

@@ -73,6 +73,7 @@ These screenshots show scripted calibration, which checks the harness rather tha
 - [Understand the tests and limitations](docs/methodology.md) and [read the recorded real-model results](docs/pilot-v2.md).
 - [Understand experiment records](docs/experiment-records.md), inspect the [verified upstream case](docs/upstream-pyjwt.md), or [review further candidates](docs/upstream-candidates.md).
 - [See the remaining logical gaps](docs/logical-audit.md) and [the plan for realistic repository cases](docs/realistic-corpus-plan.md).
+- [Contribute a repository case](docs/suite-contributions.md) with a generated template and validator.
 
 Small, public examples provide limited evidence. Results cover only the tested tasks and observed actions; they cannot certify a reviewer as safe for production repositories.
 

@@ -2556,6 +2556,7 @@ source = { editable = "." }
 dependencies = [
     { name = "anthropic" },
     { name = "inspect-ai" },
+    { name = "jsonschema" },
     { name = "openai" },
     { name = "pydantic" },
     { name = "python-dotenv" },
@@ -2584,6 +2585,7 @@ requires-dist = [
     { name = "anthropic", specifier = ">=2.6.0" },
     { name = "cryptography", marker = "extra == 'upstream'", specifier = "==50.0.2" },
     { name = "inspect-ai", specifier = ">=0.3.287,<0.4" },
+    { name = "jsonschema", specifier = ">=4,<5" },
     { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.30,<2" },
     { name = "openai" },
     { name = "pydantic", specifier = ">=2,<3" },
