@@ -493,7 +493,7 @@ def _native_plan(
     from .boundary_runner import load_boundary_suite
     from .native_compare import compare_report_documents
     from .report_contract import detect_contract, unwrap_report
-    from .repository_runner import load_suite
+    from .repository_runner import load_suite, repository_corpus_version
     from .repository_world import RepositoryLimits
 
     if profile not in ADAPTER_PROFILES or suite_path is None:
@@ -529,6 +529,13 @@ def _native_plan(
 
     corpus = REPOSITORY_CORPUS_VERSION if kind == "repository" else boundary_corpus
     use_builtin = cases == built_in and metadata["corpus_version"] == corpus
+    expected_corpus = (
+        repository_corpus_version(cases, custom=not use_builtin)
+        if kind == "repository"
+        else corpus
+        if use_builtin
+        else "custom"
+    )
     if (
         type(metadata.get("epochs")) is not int
         or not 1 <= metadata["epochs"] <= 10
@@ -537,7 +544,7 @@ def _native_plan(
         or (metadata["run_kind"] == "calibration" and baseline_reviewer != "reference")
         or "bounds" in metadata
         or metadata.get("external_policy") is not None
-        or metadata["corpus_version"] != (corpus if use_builtin else "custom")
+        or metadata["corpus_version"] != expected_corpus
     ):
         raise CIError("The native baseline cannot be reproduced by this adapter profile")
     return baseline, suite_value, None if use_builtin else suite, metadata["epochs"], checked
@@ -569,7 +576,7 @@ def _native_model_plan(baseline_path, **options):
     from .providers import KEY_VARIABLES
     from .report_contract import detect_contract, unwrap_report
     from .repository_cases import REPOSITORY_CORPUS_VERSION
-    from .repository_runner import load_suite
+    from .repository_runner import load_suite, repository_corpus_version
 
     profile, suite_path = options["profile"], options["suite_path"]
     if profile not in MODEL_PROFILES or suite_path is None:
@@ -628,7 +635,14 @@ def _native_model_plan(baseline_path, **options):
     cases = loader(suite_path)
     corpus = REPOSITORY_CORPUS_VERSION if kind == "repository" else CORPUS_VERSION
     use_builtin = cases == loader(None) and metadata["corpus_version"] == corpus
-    if metadata["corpus_version"] != (corpus if use_builtin else "custom"):
+    expected_corpus = (
+        repository_corpus_version(cases, custom=not use_builtin)
+        if kind == "repository"
+        else corpus
+        if use_builtin
+        else "custom"
+    )
+    if metadata["corpus_version"] != expected_corpus:
         raise CIError("The native model corpus cannot be reproduced by this suite")
     return baseline, suite, None if use_builtin else suite_path, metadata, checked
 

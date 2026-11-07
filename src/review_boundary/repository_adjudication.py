@@ -25,17 +25,22 @@ from .repository_cases import (
     RepositoryCase,
     case_digest,
 )
+from .repository_cases_v2 import REPOSITORY_PAYLOAD_SCORING_VERSION, RepositoryCaseV2
+from .repository_runtime import (
+    parse_repository_case,
+    restore_repository_world,
+    score_repository_case,
+)
 from .repository_world import (
     FindingAdjudication,
     RepositoryLimits,
     RepositoryReview,
-    RepositoryWorld,
     RepositoryWorldSnapshot,
     ReviewAdjudication,
     finding_digest,
     review_digest,
-    score_repository_world,
 )
+from .repository_world_v2 import RepositoryWorldSnapshotV2
 
 ADJUDICATION_SCHEMA_VERSION = 1
 TEMPLATE_REASON = "Awaiting evaluator adjudication."
@@ -86,7 +91,7 @@ class TrustedRepositoryObservation(FrozenModel):
     epoch: int = Field(ge=1, le=10)
     source_row_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     write_requests_seen: int = Field(ge=0, le=100000)
-    snapshot: RepositoryWorldSnapshot | None = None
+    snapshot: RepositoryWorldSnapshot | RepositoryWorldSnapshotV2 | None = None
 
 
 class RepositoryFailureSlot(FrozenModel):
@@ -148,6 +153,11 @@ class _RowIdentity:
 
 def _row_identities(report, cases: Sequence[RepositoryCase]) -> tuple[_RowIdentity, ...]:
     if (
+        not cases
+        or len({isinstance(parse_repository_case(case), RepositoryCaseV2) for case in cases}) != 1
+    ):
+        raise ValueError("Adjudication requires homogeneous repository case versions.")
+    if (
         not isinstance(report, Mapping)
         or type(report.get("schema_version")) is not int
         or report["schema_version"] != 1
@@ -167,7 +177,12 @@ def _row_identities(report, cases: Sequence[RepositoryCase]) -> tuple[_RowIdenti
     epochs = metadata.get("epochs")
     if (
         metadata.get("run_kind") != "model"
-        or metadata.get("scoring_version") != REPOSITORY_SCORING_VERSION
+        or metadata.get("scoring_version")
+        != (
+            REPOSITORY_PAYLOAD_SCORING_VERSION
+            if cases and isinstance(cases[0], RepositoryCaseV2)
+            else REPOSITORY_SCORING_VERSION
+        )
         or type(metadata.get("expected_count")) is not int
         or metadata["expected_count"] != len(rows)
         or type(metadata.get("case_count")) is not int
@@ -516,15 +531,15 @@ def adjudicate_observation(
         or trusted.snapshot is None
     ):
         raise ValueError("Source row does not bind to its trusted scorer observation.")
-    world = RepositoryWorld.from_snapshot(case, trusted.snapshot, expected_limits=limits)
+    world = restore_repository_world(case, trusted.snapshot, expected_limits=limits)
     writes = trusted.write_requests_seen
-    base = score_repository_world(case, world, write_requests=writes)
+    base = score_repository_case(case, world, write_requests=writes)
     if any(
         key not in source_row or not _json_type_exact(source_row[key], value)
         for key, value in base.items()
     ):
         raise ValueError("Source row does not match its trusted observation.")
-    result = score_repository_world(
+    result = score_repository_case(
         case, world, finding_decisions, review_decision, write_requests=writes
     )
     if any(
@@ -634,7 +649,7 @@ def observations_from_logs(
         for sample in log.samples or []:
             if not isinstance(sample.metadata, Mapping) or "case" not in sample.metadata:
                 raise ValueError("Repository sample is missing its immutable case metadata.")
-            logged = _strict(RepositoryCase, sample.metadata["case"])
+            logged = parse_repository_case(sample.metadata["case"])
             digest = case_digest(logged)
             if by_digest.get(digest) != logged or type(sample.epoch) is not int:
                 raise ValueError("Repository sample does not match the declared suite.")
@@ -662,7 +677,12 @@ def observations_from_logs(
         if row["error"] is None:
             if not isinstance(snapshot, dict):
                 raise ValueError("Repository observation is duplicate or missing.")
-            parsed_snapshot = _strict(RepositoryWorldSnapshot, snapshot)
+            parsed_snapshot = _strict(
+                RepositoryWorldSnapshotV2
+                if isinstance(by_digest[row["case_sha256"]], RepositoryCaseV2)
+                else RepositoryWorldSnapshot,
+                snapshot,
+            )
         observations[slot] = TrustedRepositoryObservation(
             case_sha256=row["case_sha256"],
             reviewer=row["reviewer"],

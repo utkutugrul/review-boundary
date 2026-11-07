@@ -59,15 +59,31 @@ def parser():
         "suite-schema", help="Print the JSON Schema derived from the repository suite model"
     )
     suite_schema.add_argument("--output", type=Path, help="New JSON file")
+    suite_schema.add_argument("--schema-version", type=int, choices=(1, 2), default=1)
+    for name, help_text in (
+        ("payload-pack", "Print or export the original versioned data-only payload pack"),
+        ("payload-suite", "Export 12 original repository cases for one payload carrier"),
+        ("worker-summary-suite", "Export 24 matched boundary authorization controls"),
+    ):
+        command = commands.add_parser(name, help=help_text)
+        command.add_argument("--output", type=Path, help="New JSON file; default is stdout")
+        if name != "payload-pack":
+            command.add_argument("--pack", type=Path, help="Explicit bounded payload pack JSON")
+        if name == "payload-suite":
+            command.add_argument(
+                "--carrier",
+                choices=("readme", "pr", "inert_file", "filename", "code_comment", "tool_output"),
+                required=True,
+            )
     for name in ("boundary-demo", "boundary-run-adapter"):
         command = commands.add_parser(name, help="Compare virtual actions with and without a guard")
         command.add_argument("--output", type=Path, required=True)
         command.add_argument("--epochs", type=int, default=1)
         command.add_argument("--guard", choices=("both", "on", "off"), default="both")
         command.add_argument("--policy", type=Path, help="Optional trusted local policy process")
+        command.add_argument("--suite", type=Path, help="Custom bounded boundary suite")
         if name == "boundary-run-adapter":
             command.add_argument("--adapter", type=Path, required=True)
-            command.add_argument("--suite", type=Path, help="Custom bounded boundary suite")
     boundary_model = commands.add_parser(
         "boundary-run-model", help="Run provider models with virtual action boundaries"
     )
@@ -100,11 +116,9 @@ def parser():
         command = commands.add_parser(name, help="Run the opt-in multi-file repository contract")
         command.add_argument("--output", type=Path, required=True)
         command.add_argument("--epochs", type=int, default=1)
+        command.add_argument("--suite", type=Path, help="Custom evaluator-only repository suite")
         if name == "repository-run-adapter":
             command.add_argument("--adapter", type=Path, required=True)
-            command.add_argument(
-                "--suite", type=Path, help="Custom evaluator-only repository suite"
-            )
     export = commands.add_parser(
         "adjudication-export", help="Create an all-unknown repository adjudication template"
     )
@@ -668,6 +682,51 @@ def _format_native_comparison(result):
     return "\n".join(lines)
 
 
+def payload_command(args) -> int:
+    """Export bounded bundled data without executing a reviewer or a candidate."""
+    from .json_input import MAX_REPORT_BYTES, read_json_object
+    from .payload_fixtures import build_repository_payload_cases, build_worker_summary_cases
+    from .payload_packs import build_original_payload_pack, parse_payload_pack
+    from .repository_cases import build_repository_demo_cases
+    from .repository_suite import parse_repository_suite
+    from .suite_validation import _emit, _new_output_path
+
+    output = None if args.output is None else _new_output_path(args.output)
+    pack_path = getattr(args, "pack", None)
+    pack = (
+        parse_payload_pack(read_json_object(pack_path))
+        if pack_path is not None
+        else build_original_payload_pack()
+    )
+    if args.command == "payload-pack":
+        document = pack.model_dump(mode="json")
+    elif args.command == "payload-suite":
+        cases = tuple(
+            case
+            for base in build_repository_demo_cases()
+            if base.surface == "clean"
+            for case in build_repository_payload_cases(base, pack, carrier=args.carrier)
+        )
+        if len(cases) > 32:
+            raise ValueError(
+                "Payload pack produces more than the repository suite bound of 32 cases"
+            )
+        document = parse_repository_suite(
+            {"schema_version": 2, "cases": [case.model_dump(mode="json") for case in cases]}
+        ).model_dump(mode="json")
+    else:
+        document = {
+            "schema_version": 1,
+            "cases": [case.model_dump(mode="json") for case in build_worker_summary_cases(pack)],
+        }
+    if len(json.dumps(document, ensure_ascii=False).encode("utf-8")) > MAX_REPORT_BYTES:
+        raise ValueError("Bundled payload export exceeds the JSON file bound")
+    written = _emit(document, output)
+    if written is not None:
+        print("Payload data: " + str(written))
+    return 0
+
+
 def main(argv=None):
     args = parser().parse_args(argv)
     try:
@@ -690,6 +749,8 @@ def main(argv=None):
             from .suite_validation import suite_schema_command
 
             return suite_schema_command(args)
+        if args.command in ("payload-pack", "payload-suite", "worker-summary-suite"):
+            return payload_command(args)
         if args.command in ("boundary-demo", "boundary-run-adapter", "boundary-run-model"):
             from .boundary_runner import run_boundary_command, run_boundary_model
 

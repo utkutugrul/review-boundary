@@ -23,6 +23,9 @@
   const MAX_EVENTS = 1000;
   const MAX_FINDINGS = 100;
   const MAX_REVIEW_BYTES = 32768;
+  const PAYLOAD_SCORING = "repository-payload-v1";
+  const PAYLOAD_CARRIERS = ["readme", "pr", "inert_file", "filename", "code_comment", "tool_output"];
+  const PAYLOAD_CONDITIONS = ["clean", "attack", "benign_quote"];
   const SHA256 = /^[0-9a-f]{64}$/;
   const BLANK = /^[\t-\r\x1c-\x20\x85\xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]*$/;
 
@@ -479,12 +482,67 @@
     };
   }
 
-  function nativeEvent(value, where, boundary) {
+  function payloadReference(value, where) {
+    closedObject(value, where, ["pack_id", "pack_version", "pack_digest", "entry_id", "carrier", "condition"]);
+    for (const key of ["pack_id", "entry_id"]) textField(value, key, where, { min: 1, max: 64, pattern: /^[a-z][a-z0-9_]{0,63}$(?![\s\S])/ });
+    intField(value, "pack_version", where, { min: 1, max: 1000000 });
+    hashField(value, "pack_digest", where);
+    textField(value, "pack_digest", where, { min: 64, max: 64 });
+    literalField(value, "carrier", where, PAYLOAD_CARRIERS);
+    literalField(value, "condition", where, PAYLOAD_CONDITIONS);
+    return value;
+  }
+
+  function canonicalJSON(value) {
+    if (isArray(value)) return `[${value.map(canonicalJSON).join(",")}]`;
+    if (isPlain(value)) return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonicalJSON(value[key])}`).join(",")}}`;
+    return JSON.stringify(value);
+  }
+
+  function repositoryArguments(tool, value, where) {
+    if (tool === "read_pr") { closedObject(value, where, []); return {}; }
+    if (tool === "list_files" || tool === "search_files") {
+      const search = tool === "search_files";
+      closedObject(value, where, search ? ["query"] : [], search ? ["prefix", "cursor", "limit", "case_sensitive"] : ["prefix", "cursor", "limit"]);
+      const prefix = textField(value, "prefix", where, { optional: true }) ?? "";
+      if (prefix !== "") virtualPath(prefix, `${where}.prefix`);
+      const cursor = intField(value, "cursor", where, { min: 0, max: 1000000, optional: true }) ?? 0;
+      const limit = intField(value, "limit", where, { min: 1, max: 100, optional: true }) ?? 20;
+      if (!search) return { prefix, cursor, limit };
+      const query = textField(value, "query", where, { min: 1, max: 256 });
+      utf8Limit(query, 256, `${where}.query`);
+      const case_sensitive = boolField(value, "case_sensitive", where, { optional: true }) ?? true;
+      return { prefix, cursor, limit, query, case_sensitive };
+    }
+    if (tool === "read_file") {
+      closedObject(value, where, ["path", "end_line"], ["start_line"]);
+      const path = pathField(value, "path", where);
+      const start_line = intField(value, "start_line", where, { min: 1, max: 1000000, optional: true }) ?? 1;
+      const end_line = intField(value, "end_line", where, { min: 1, max: 1000000 });
+      if (start_line > end_line) fail(`${where} file range is reversed`);
+      return { path, start_line, end_line };
+    }
+    if (tool === "write_file") {
+      closedObject(value, where, ["path", "content"]);
+      const path = pathField(value, "path", where);
+      const content = textField(value, "content", where, { max: 65536 });
+      utf8Limit(content, 65536, `${where}.content`);
+      return { path, content };
+    }
+    if (tool === "submit_review") {
+      repositoryReview(value, where);
+      return { verdict: value.verdict, findings: value.findings.map((finding, i) => repositoryFinding(finding, `${where}.findings[${i}]`)) };
+    }
+    fail(`${where} has no valid tool arguments`);
+  }
+
+  function nativeEvent(value, where, boundary, payload = false) {
     const base = ["tool", "status", "response_bytes"];
-    const optional = ["review_sha256", "path", "lines", "matches"].concat(boundary ? ["policy_sequence"] : []);
+    if (payload) base.push("requested_tool");
+    const optional = ["review_sha256", "path", "lines", "matches"].concat(boundary ? ["policy_sequence"] : [], payload ? ["arguments_json", "response_sha256", "paths"] : []);
     closedObject(value, where, base, optional);
     const tool = literalField(value, "tool", where, boundary ? BOUNDARY_TOOLS : REPO_TOOLS);
-    const status = literalField(value, "status", where, boundary ? BOUNDARY_STATUSES : REPO_STATUSES);
+    const status = literalField(value, "status", where, boundary ? BOUNDARY_STATUSES : payload ? REPO_STATUSES.concat(["trace_bytes"]) : REPO_STATUSES);
     const bytes = intField(value, "response_bytes", where, { min: 0, max: 65536 });
     const digestValue = hashField(value, "review_sha256", where, { optional: true, nullable: true });
     const digest = digestValue === undefined ? null : digestValue;
@@ -511,10 +569,34 @@
       });
       if (seen.size !== matches.length) fail(`${where}.matches must not repeat`);
     }
+    let argumentBytes = 0;
+    let paths = [];
+    if (payload) {
+      const requested = literalField(value, "requested_tool", where, REPO_TOOLS.filter(name => name !== "limits"));
+      const args = textField(value, "arguments_json", where, { max: 131072, nullable: true, optional: true }) ?? null;
+      const response = hashField(value, "response_sha256", where, { nullable: true, optional: true }) ?? null;
+      if (args !== null) {
+        utf8Limit(args, 131072, `${where}.arguments_json`);
+        const decoded = parseStrictJSON(args);
+        if (!isPlain(decoded) || canonicalJSON(repositoryArguments(requested, decoded, `${where}.arguments_json`)) !== args) fail(`${where} arguments must be canonical validated tool arguments with defaults`);
+        argumentBytes = utf8Bytes(args);
+      } else if (["ok", "blocked", "trace_bytes"].includes(status)) fail(`${where} requires replayable arguments`);
+      if (hasOwn(value, "paths")) {
+        paths = value.paths;
+        if (!isArray(paths) || paths.length > 100) fail(`${where}.paths must be a bounded list`);
+        paths.forEach((path, i) => { if (typeof path !== "string") fail(`${where}.paths must contain paths`); virtualPath(path, `${where}.paths[${i}]`); });
+        if (new Set(paths).size !== paths.length) fail(`${where}.paths must not repeat`);
+      }
+      if (tool === "limits") {
+        if (response !== null) fail(`${where} limits cannot claim a response digest`);
+      } else if (response === null || requested !== tool) fail(`${where} requires a matching requested tool and response digest`);
+      if (status !== "ok" && (path !== null || lines.length || matches.length || paths.length)) fail(`${where} only successful calls may record paths or lines`);
+      if (tool !== "list_files" && paths.length) fail(`${where} only listings may record returned paths`);
+    }
     if (tool === "limits") {
-      if (status !== "calls" && status !== "response_bytes") fail(`${where} limit events require a limit status`);
+      if (status !== "calls" && status !== "response_bytes" && !(payload && status === "trace_bytes")) fail(`${where} limit events require a limit status`);
       if (bytes !== 0) fail(`${where} limit events cannot claim response bytes`);
-    } else if (status === "calls" || status === "response_bytes") fail(`${where} only limit events may carry a limit status`);
+    } else if (status === "calls" || status === "response_bytes" || (payload && status === "trace_bytes")) fail(`${where} only limit events may carry a limit status`);
     else if (bytes === 0) fail(`${where} completed tool calls must record response bytes`);
     if (tool === "submit_review" && status === "ok") {
       if (digest === null) fail(`${where} successful submissions require a review digest`);
@@ -530,7 +612,7 @@
       if (EFFECT_TOOLS.includes(tool) !== (sequence !== null)) fail(`${where} effect events require exactly one policy sequence`);
       if (tool === "read_action_request" && status !== "ok" && status !== "error") fail(`${where} action request reads require an ordinary status`);
     }
-    return { tool, status, response_bytes: bytes, review_sha256: digest, policy_sequence: sequence };
+    return { tool, status, response_bytes: bytes, review_sha256: digest, policy_sequence: sequence, argument_bytes: argumentBytes };
   }
 
   function boundaryTrace(value, where) {
@@ -696,6 +778,17 @@
   function nativeRow(row, kind, where) {
     if (!isPlain(row)) fail("Native report rows must be objects");
     for (const key of REPOSITORY_STRINGS) textField(row, key, where, { nonBlank: true });
+    const payload = kind === "repository" && row.scoring_version === PAYLOAD_SCORING;
+    if (kind === "repository" && !payload && ["case_schema_version", "payload_ref", "carrier_observed"].some(key => hasOwn(row, key))) fail("Repository payload fields require their explicit scoring version");
+    if (payload) {
+      intField(row, "case_schema_version", where, { min: 2, max: 2 });
+      const ref = payloadReference(own(row, "payload_ref"), `${where}.payload_ref`);
+      const observed = boolField(row, "carrier_observed", where);
+      literalField(row, "condition", where, PAYLOAD_CONDITIONS);
+      if (ref.carrier !== row.surface || ref.condition !== row.condition) fail("Repository payload identity disagrees with its reference");
+      if (row.payload_exposed !== (row.condition === "attack" && observed)) fail("Repository payload exposure disagrees with carrier delivery");
+      if (row.conclusive && !observed) fail("Repository payload conclusions require carrier delivery");
+    }
     hashField(row, "case_sha256", where);
     intField(row, "epoch", where, { min: 1 });
     for (const key of REPOSITORY_BOOLEANS) boolField(row, key, where);
@@ -764,7 +857,16 @@
 
     const events = own(row, "events");
     if (!isArray(events) || events.length > MAX_EVENTS) fail("Native event trace exceeds its bound");
-    const parsed = events.map((event, i) => nativeEvent(event, `${where}.events[${i}]`, kind === "boundary"));
+    const parsed = events.map((event, i) => nativeEvent(event, `${where}.events[${i}]`, kind === "boundary", payload));
+    if (payload) {
+      const limits = parsed.map((event, index) => event.tool === "limits" ? index : -1).filter(index => index >= 0);
+      if (limits.length && (limits.length !== 1 || limits[0] !== events.length - 1)) fail("Repository payload limits must terminate the trace");
+      const total = parsed.reduce((sum, event) => sum + event.argument_bytes, 0);
+      const terminal = limits.length ? parsed[parsed.length - 1].status : null;
+      if (total > 1048576) {
+        if (!["trace_bytes", "calls"].includes(terminal) || total - parsed[parsed.length - 1].argument_bytes > 1048576) fail("Repository payload arguments exceed the trace bound");
+      } else if (terminal === "trace_bytes") fail("Repository payload trace limit requires an argument overflow");
+    }
     if (row.tool_calls !== events.length || row.output_bytes !== parsed.reduce((sum, e) => sum + e.response_bytes, 0)) fail("Native call and byte counts disagree with recorded events");
     if (row.write_requests_seen < parsed.filter(e => e.tool === "write_file").length) fail("Native write attempts cannot omit recorded write calls");
     if (kind === "boundary") boundaryRow(row, parsed, where);
@@ -1245,6 +1347,7 @@
       verification_supplied: context.state === "ok",
     });
     const results = native.rows.map((row, index) => {
+      const expectedVersion = kind === "repository" && row.scoring_version === PAYLOAD_SCORING ? 2 : 1;
       const candidates = bindings.filter(binding => binding.row_index === index);
       // Native payloads stay unchanged. Explicit compiler-supplied consistency
       // results are separate from report data and remain unchecked in this viewer.
@@ -1257,7 +1360,7 @@
         if (record.status === "matching_supplied_artifact") {
           if (row.error !== null || ["provider_error", "invalid_eval_log"].includes(row.stop_reason)) return base(index, "unavailable", "failed_execution_has_no_usable_snapshot_binding", record);
           if (kind === "boundary" && native.metadata.external_policy != null) return base(index, "unsupported_policy", "external_policy_has_no_snapshot_restore_contract", record);
-          if (record.snapshot_version !== 1) return base(index, "unsupported_version", "unsupported_snapshot_version", record);
+          if (record.snapshot_version !== expectedVersion) return base(index, "unsupported_version", "unsupported_snapshot_version", record);
           if (record.reason !== "document_consistency_only" || !CASE_VALIDATIONS.includes(record.case_validation)) return base(index, "unavailable", "verification_record_inconsistent", record);
           result.case_validation = record.case_validation;
         }
@@ -1283,7 +1386,7 @@
         if (!complete || record.reason !== "document_consistency_only" || !CASE_VALIDATIONS.includes(validation)) return inconsistent();
         if (row.error !== null || ["provider_error", "invalid_eval_log"].includes(row.stop_reason)) return base(index, "unavailable", "failed_execution_has_no_usable_snapshot_binding", binding);
         if (kind === "boundary" && native.metadata.external_policy != null) return base(index, "unsupported_policy", "external_policy_has_no_snapshot_restore_contract", binding);
-        if (record.snapshot_version !== 1) return base(index, "unsupported_version", "unsupported_snapshot_version", binding);
+        if (record.snapshot_version !== expectedVersion) return base(index, "unsupported_version", "unsupported_snapshot_version", binding);
         result.case_validation = validation;
       } else if (validation === "not_supplied") result.case_validation = validation;
       return result;

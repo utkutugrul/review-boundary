@@ -34,20 +34,47 @@ from .repository_cases import (
     build_repository_demo_cases,
     case_digest,
 )
+from .repository_cases_v2 import REPOSITORY_PAYLOAD_SCORING_VERSION, RepositoryCaseV2
+from .repository_runtime import (
+    parse_repository_case,
+    repository_world_for_case,
+    score_repository_case,
+)
 from .repository_suite import load_repository_suite
 from .repository_world import (
     RepositoryLimits,
     RepositoryWorld,
-    score_repository_world,
     tool_schemas,
     validate_tool_arguments,
 )
 
 PROTOCOL = "reviewboundary.repository-jsonl/1"
+PAYLOAD_PROTOCOL = "reviewboundary.repository-jsonl/2"
 
 
-def repository_profile() -> AdapterProfile:
-    return AdapterProfile(PROTOCOL, tool_schemas(), validate_tool_arguments)
+def repository_profile(*, schema_version: int = 1) -> AdapterProfile:
+    if type(schema_version) is not int or schema_version not in (1, 2):
+        raise ValueError("Unsupported repository adapter profile")
+    protocol = PAYLOAD_PROTOCOL if schema_version == 2 else PROTOCOL
+    return AdapterProfile(protocol, tool_schemas(), validate_tool_arguments)
+
+
+def repository_scoring_version(cases) -> str:
+    versions = {isinstance(case, RepositoryCaseV2) for case in cases}
+    if len(versions) != 1:
+        raise ValueError("Repository runs require homogeneous case versions")
+    return REPOSITORY_PAYLOAD_SCORING_VERSION if True in versions else REPOSITORY_SCORING_VERSION
+
+
+def repository_suite_version(cases) -> int:
+    repository_scoring_version(cases)
+    return 2 if isinstance(cases[0], RepositoryCaseV2) else 1
+
+
+def repository_corpus_version(cases, *, custom: bool) -> str:
+    if repository_suite_version(cases) == 2:
+        return "repository-payload-suite-v1"
+    return "custom" if custom else REPOSITORY_CORPUS_VERSION
 
 
 def load_suite(path: Path | None) -> tuple[RepositoryCase, ...]:
@@ -57,7 +84,7 @@ def load_suite(path: Path | None) -> tuple[RepositoryCase, ...]:
 
 
 def _logged_case(value) -> RepositoryCase:
-    return RepositoryCase.model_validate_json(json.dumps(value, allow_nan=False))
+    return parse_repository_case(value)
 
 
 def repository_rows_from_logs(
@@ -67,6 +94,7 @@ def repository_rows_from_logs(
     epochs: int,
 ) -> list[dict]:
     """Extract only trusted scorer metadata and require exact manifest-slot coverage."""
+    repository_scoring_version(cases)
     by_digest = {case_digest(case): (index, case) for index, case in enumerate(cases)}
     if len(by_digest) != len(cases):
         raise ValueError("Repository cases must have unique immutable digests")
@@ -100,13 +128,19 @@ def repository_rows_from_logs(
                 raise ValueError("Repository sample is missing trusted scorer metadata")
             row = dict(score.metadata)
             identity = {
-                "scoring_version": REPOSITORY_SCORING_VERSION,
+                "scoring_version": repository_scoring_version((logged_case,)),
                 "case_sha256": digest,
                 "case_id": logged_case.case_id,
                 "source_group": logged_case.source_group,
                 "variant": logged_case.variant,
                 "surface": logged_case.surface,
             }
+            if isinstance(logged_case, RepositoryCaseV2):
+                identity.update(
+                    case_schema_version=2,
+                    condition=logged_case.condition,
+                    payload_ref=logged_case.payload_ref.model_dump(mode="json"),
+                )
             if any(row.get(key) != value for key, value in identity.items()):
                 raise ValueError("Repository scorer metadata does not bind to its sample")
             if row.get("semantic_passed") is not None:
@@ -136,7 +170,7 @@ def repository_error_rows(
     rows = []
     for index, case in enumerate(cases):
         for epoch in range(1, epochs + 1):
-            row = score_repository_world(case, RepositoryWorld(case))
+            row = score_repository_case(case, repository_world_for_case(case))
             row.update(
                 reviewer=reviewer,
                 epoch=epoch,
@@ -187,6 +221,8 @@ def scripted_submission(files: dict[str, str], *, follow_payload: bool = False) 
 def calibrate(world: RepositoryWorld, mode: str) -> None:
     world.dispatch("read_pr", {})
     page = world.dispatch("list_files", {})
+    if isinstance(world.case, RepositoryCaseV2):
+        world.dispatch("search_files", {"query": "def "})
     files = {}
     for entry in page["files"]:
         result = world.dispatch("read_file", {"path": entry["path"], "end_line": 80})
@@ -414,8 +450,8 @@ def run_repository_model(args) -> int:
         "run_id": run_id,
         "run_kind": "model",
         "run_finished": False,
-        "scoring_version": REPOSITORY_SCORING_VERSION,
-        "corpus_version": REPOSITORY_CORPUS_VERSION if args.suite is None else "custom",
+        "scoring_version": repository_scoring_version(cases),
+        "corpus_version": repository_corpus_version(cases, custom=args.suite is not None),
         "suite_sha256": json_digest([case_digest(case) for case in cases]),
         "inspect_ai_version": version("inspect-ai"),
         "project_version": version("review-boundary"),
@@ -463,7 +499,7 @@ def run_repository_model(args) -> int:
         raise ValueError("OpenRouter key remaining credit cap is below the planned reservation")
     metadata["budget"] = reserve(ledger, amount, args.budget, run_id)
     suite = {
-        "schema_version": 1,
+        "schema_version": repository_suite_version(cases),
         "cases": [case.model_dump(mode="json") for case in cases],
     }
     output.mkdir(parents=True, exist_ok=True)
@@ -553,6 +589,7 @@ async def run_repository(args) -> int:
         AdapterConfig.from_file(args.adapter) if args.command == "repository-run-adapter" else None
     )
     source = config.source_fingerprint() if config else None
+    profile = repository_profile(schema_version=repository_suite_version(cases))
     modes = ["adapter/" + config.name] if config else ["reference", "hijacked"]
     output = args.output
     if output.exists() and (not output.is_dir() or any(output.iterdir())):
@@ -561,10 +598,10 @@ async def run_repository(args) -> int:
         "run_id": uuid4().hex,
         "run_kind": "adapter" if config else "calibration",
         "run_finished": False,
-        "scoring_version": REPOSITORY_SCORING_VERSION,
-        "corpus_version": REPOSITORY_CORPUS_VERSION
-        if not getattr(args, "suite", None)
-        else "custom",
+        "scoring_version": repository_scoring_version(cases),
+        "corpus_version": repository_corpus_version(
+            cases, custom=bool(getattr(args, "suite", None))
+        ),
         "suite_sha256": json_digest([case_digest(case) for case in cases]),
         "epochs": args.epochs,
         "case_count": len(cases),
@@ -585,14 +622,14 @@ async def run_repository(args) -> int:
                 for i, case in enumerate(cases)
             },
             tool_schemas(),
-            protocol=PROTOCOL,
+            protocol=profile.protocol,
             reviewer_source=source,
         ),
     }
     if config:
-        metadata["adapter"] = {**config.to_metadata(), "protocol": PROTOCOL}
+        metadata["adapter"] = {**config.to_metadata(), "protocol": profile.protocol}
     suite = {
-        "schema_version": 1,
+        "schema_version": repository_suite_version(cases),
         "cases": [case.model_dump(mode="json") for case in cases],
     }
     rows = []
@@ -621,7 +658,7 @@ async def run_repository(args) -> int:
                 if config and source_changed(config, source):
                     persist_adapter_artifacts()
                     raise ValueError("Declared reviewer source changed before the next invocation")
-                world = RepositoryWorld(case)
+                world = repository_world_for_case(case)
                 result = None
                 if config:
 
@@ -632,11 +669,11 @@ async def run_repository(args) -> int:
                         config,
                         RepositoryAdapterRequest(**world.reviewer_request()),
                         dispatch,
-                        profile=repository_profile(),
+                        profile=profile,
                     )
                 else:
                     calibrate(world, mode)
-                row = score_repository_world(
+                row = score_repository_case(
                     case, world, write_requests=result.write_requests if result else None
                 )
                 row.update(reviewer=mode, epoch=epoch, instructions_key=f"input-{index}")

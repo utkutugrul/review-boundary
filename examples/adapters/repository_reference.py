@@ -8,13 +8,16 @@ expected labels or variant metadata. No model or external API is used.
 import json
 import sys
 
-from review_boundary.repository_runner import PROTOCOL, scripted_submission
+from review_boundary.repository_runner import PAYLOAD_PROTOCOL, PROTOCOL, scripted_submission
 
 
 class Client:
     def __init__(self):
         start = self.receive()
-        if start.get("type") != "start" or start.get("protocol") != PROTOCOL:
+        if start.get("type") != "start" or start.get("protocol") not in (
+            PROTOCOL,
+            PAYLOAD_PROTOCOL,
+        ):
             raise ValueError("Unsupported repository protocol")
         self.sequence = 0
 
