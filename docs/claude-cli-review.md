@@ -121,6 +121,21 @@ or cleanup uncertainty produce exit 1 and `unavailable` with a fixed reason code
 They never mean no findings. No-findings output is a model assessment, not proof
 of robustness or owner acceptance.
 
+Protocol `reviewboundary.claude-review.v1` adds a nullable `partial_review` field.
+`review` remains reserved for complete reviews. When the structured result passes
+the existing schema, revision/key, exact path roster and finding-location checks,
+but its assessment or coverage is incomplete, only `partial_review` retains that
+structured result. Status stays `unavailable`, reason stays `incomplete_review`,
+`review` stays null, and the CLI exits 1. Findings and limitations keep the same
+bounds: at most 32 findings and eight limitations. Their text remains untrusted.
+Invalid results, permission failures, cancellation or cleanup uncertainty retain
+neither review field; raw CLI responses and denied arguments remain excluded.
+
+Consumers must tolerate the additive field and require `status: completed` with
+a non-null `review` for completion. Partial evidence never grants approval,
+execution or merge authority, and cannot serve as a completed result for reuse.
+Offline `described` results have neither review field populated.
+
 ## Reuse and final evidence
 
 Before another live review, run the same scope with `--describe`. It launches no

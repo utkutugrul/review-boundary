@@ -1,6 +1,7 @@
 """Ordinary CLI contract tests. Every reviewer executable here is a trusted fake."""
 
 import importlib.util
+import io
 import json
 import os
 import signal
@@ -9,6 +10,7 @@ import sys
 import tempfile
 import time
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -81,6 +83,7 @@ class ClaudeReviewContract(unittest.TestCase):
             f"#!{sys.executable}\n"
             "import json, os, signal, sys, time\n"
             f"mode = {mode!r}\n"
+            "outcome, _, mode = mode.rpartition(':')\n"
             f"flags = {bridge.FLAGS!r}\n"
             "args = sys.argv[1:]\n"
             f"assert not any(name in os.environ for name in {EXCLUDED_ENV!r})\n"
@@ -117,12 +120,27 @@ class ClaudeReviewContract(unittest.TestCase):
             "        {'path': f['path'], 'status': 'reviewed'} for f in request['files']],\n"
             "    'findings': [], 'limitations': []}\n"
             "envelope = {'type': 'result', 'subtype': 'success', 'is_error': False,\n"
-            "            'permission_denials': [], 'structured_output': review}\n"
-            "if mode == 'finding':\n"
+            "            'permission_denials': [], 'structured_output': review,\n"
+            "            'result': 'never-retain-raw-cli-output'}\n"
+            "if mode in ['finding', 'refusal', 'partial', 'unavailable', 'bounded'] "
+            "or outcome == 'partial':\n"
             "    review['findings'] = [{'priority': 'P2', 'path': 'safe.py', 'line_start': 1,\n"
             "        'line_end': 2, 'title': 'Synthetic finding', 'body': 'Synthetic evidence.'}]\n"
-            "if mode == 'refusal': review['assessment'] = 'unavailable'\n"
-            "if mode == 'partial': review['coverage'][0]['status'] = 'partial'\n"
+            "if mode in ['refusal', 'partial', 'unavailable', 'bounded'] or outcome == 'partial':\n"
+            "    review['limitations'] = ['Synthetic limitation.']\n"
+            "if mode in ['refusal', 'unavailable', 'bounded']: review['assessment'] = 'unavailable'\n"
+            "if mode in ['partial', 'bounded'] or outcome == 'partial':\n"
+            "    review['coverage'][0]['status'] = 'partial'\n"
+            "if mode == 'unavailable': review['coverage'][0]['status'] = 'unavailable'\n"
+            "if mode == 'bounded':\n"
+            "    review['findings'][0].update(title='T' * 160, body='B' * 2000)\n"
+            "    review['findings'] *= 32; review['limitations'] = ['L' * 1000] * 8\n"
+            "if mode == 'too_many_findings': review['findings'] *= 33\n"
+            "if mode == 'long_body': review['findings'][0]['body'] = 'B' * 2001\n"
+            "if mode == 'long_title': review['findings'][0]['title'] = 'T' * 161\n"
+            "if mode == 'too_many_limitations': review['limitations'] *= 9\n"
+            "if mode == 'long_limitation': review['limitations'] = ['L' * 1001]\n"
+            "if mode == 'unsafe_text': review['findings'][0]['body'] = 'never-retain\\x00'\n"
             "if mode == 'missing_coverage': review['coverage'] = []\n"
             "if mode == 'duplicate_coverage': review['coverage'] = [review['coverage'][0]] * 2\n"
             "if mode == 'wrong_revision': review['revision'] = '0' * 40\n"
@@ -177,10 +195,14 @@ class ClaudeReviewContract(unittest.TestCase):
     def call(self, mode="ok", **changes):
         return bridge.review(self.args(mode, **changes))
 
-    def assert_unavailable(self, result, reason):
+    def assert_unavailable(self, result, reason, *, partial=False):
         self.assertEqual(result["status"], "unavailable", result)
         self.assertEqual(result["reason"], reason, result)
         self.assertIsNone(result["review"])
+        if partial:
+            self.assertIsNotNone(result.get("partial_review"))
+        else:
+            self.assertIsNone(result["partial_review"])
         self.assertNotIn("never-retain", json.dumps(result))
 
     def test_positive_binding_flags_environment_and_cleanup(self):
@@ -190,6 +212,7 @@ class ClaudeReviewContract(unittest.TestCase):
         ):
             result = self.call("finding")
         self.assertEqual(result["status"], "completed", result)
+        self.assertIsNone(result["partial_review"])
         self.assertEqual(result["source"]["revision"], self.head)
         self.assertEqual(result["review"]["revision"], self.head)
         self.assertEqual(result["review"]["review_key"], result["review_key"])
@@ -204,6 +227,104 @@ class ClaudeReviewContract(unittest.TestCase):
             self.assertEqual(process["cleanup"]["group_probe"], "absent")
             self.assertTrue(process["stdout_eof"] and process["stderr_eof"])
         self.assertFalse(list(self.repo.glob("claude-review-*")))
+
+    def test_cli_preserves_validated_partial_evidence_without_completion(self):
+        for mode in ("finding", "partial", "refusal", "unavailable", "bounded"):
+            with self.subTest(mode=mode):
+                process = subprocess.run(
+                    [
+                        sys.executable,
+                        str(ROOT / "scripts/claude_review.py"),
+                        "--repo",
+                        str(self.repo),
+                        "--revision",
+                        self.head,
+                        "--path",
+                        "safe.py",
+                        "--path",
+                        "other.md",
+                        "--claude",
+                        self.executable(mode),
+                    ],
+                    capture_output=True,
+                    timeout=10,
+                    check=False,
+                )
+                self.assertEqual(process.stderr, b"")
+                result = json.loads(process.stdout)
+                self.assertEqual(result["protocol"], "reviewboundary.claude-review.v1")
+                self.assertEqual(process.returncode, 0 if mode == "finding" else 1)
+                if mode == "finding":
+                    self.assertEqual(result["status"], "completed")
+                    self.assertIsNone(result.get("partial_review"))
+                    evidence = result["review"]
+                else:
+                    self.assert_unavailable(result, "incomplete_review", partial=True)
+                    evidence = result["partial_review"]
+                self.assertEqual(evidence["revision"], self.head)
+                self.assertEqual(evidence["review_key"], result["review_key"])
+                self.assertEqual(
+                    evidence["assessment"],
+                    "reviewed" if mode in {"finding", "partial"} else "unavailable",
+                )
+                status = {
+                    "partial": "partial",
+                    "unavailable": "unavailable",
+                    "bounded": "partial",
+                }.get(mode, "reviewed")
+                self.assertEqual(
+                    evidence["coverage"],
+                    [
+                        {"path": "other.md", "status": status},
+                        {"path": "safe.py", "status": "reviewed"},
+                    ],
+                )
+                finding = {
+                    "priority": "P2",
+                    "path": "safe.py",
+                    "line_start": 1,
+                    "line_end": 2,
+                    "title": "T" * 160 if mode == "bounded" else "Synthetic finding",
+                    "body": "B" * 2000 if mode == "bounded" else "Synthetic evidence.",
+                }
+                self.assertEqual(evidence["findings"], [finding] * (32 if mode == "bounded" else 1))
+                self.assertEqual(
+                    evidence["limitations"],
+                    ["L" * 1000] * 8
+                    if mode == "bounded"
+                    else ([] if mode == "finding" else ["Synthetic limitation."]),
+                )
+                self.assertEqual(result["permission_denials"], 0)
+                self.assertEqual(result["scratch_cleanup"], "removed")
+                self.assertNotIn("never-retain", process.stdout.decode())
+
+    def test_invalid_partial_outputs_are_not_retained(self):
+        cases = {
+            "wrong_revision": "source_binding_mismatch",
+            "wrong_key": "source_binding_mismatch",
+            "missing_coverage": "invalid_result",
+            "duplicate_coverage": "coverage_mismatch",
+            "bad_path": "invalid_result",
+            "bad_line": "finding_location_mismatch",
+            "bool_line": "invalid_result",
+            "extra_field": "invalid_result",
+            "too_many_findings": "invalid_result",
+            "long_body": "invalid_result",
+            "long_title": "invalid_result",
+            "too_many_limitations": "invalid_result",
+            "long_limitation": "invalid_result",
+            "unsafe_text": "invalid_result",
+            "denial": "permission_denied",
+            "missing_denials": "permission_evidence_missing",
+            "cli_error": "cli_unsuccessful",
+            "malformed": "invalid_json",
+            "stdout_flood": "output_limit",
+            "nonzero": "process_exit",
+        }
+        for mode, reason in cases.items():
+            with self.subTest(mode=mode):
+                result = self.call("partial:" + mode, path=["safe.py", "other.md"])
+                self.assert_unavailable(result, reason)
 
     def test_existing_user_identity_is_optional_and_secrets_stay_excluded(self):
         for user, mode in (("fixture-review-user", "assert_user"), (None, "assert_no_user")):
@@ -359,7 +480,7 @@ class ClaudeReviewContract(unittest.TestCase):
         for mode, reason in cases.items():
             with self.subTest(mode=mode):
                 result = self.call(mode)
-                self.assert_unavailable(result, reason)
+                self.assert_unavailable(result, reason, partial=reason == "incomplete_review")
                 if mode == "denial":
                     self.assertEqual(result["permission_denials"], 1)
 
@@ -606,14 +727,73 @@ class ClaudeReviewContract(unittest.TestCase):
         self.assert_unavailable(result, "cleanup_unconfirmed")
         self.assertEqual(result["processes"][-1]["cleanup"]["group_probe"], "denied")
 
+    def test_unconfirmed_review_cleanup_does_not_retain_evidence(self):
+        real_cleanup = bridge.cleanup
+        real_run = bridge.run_process
+
+        def unconfirmed(process, **kwargs):
+            facts = real_cleanup(process, **kwargs)
+            facts["group_probe"] = "unknown"
+            return facts
+
+        def run(*args, **kwargs):
+            if kwargs["stage"] == "review":
+                with patch.object(bridge, "cleanup", side_effect=unconfirmed):
+                    return real_run(*args, **kwargs)
+            return real_run(*args, **kwargs)
+
+        for mode in ("finding", "partial"):
+            with self.subTest(mode=mode), patch.object(bridge, "run_process", side_effect=run):
+                result = self.call(mode)
+                self.assert_unavailable(result, "cleanup_unconfirmed")
+                record = result["processes"][-1]
+                self.assertEqual(record["stage"], "review")
+                self.assertGreater(record["stdout_bytes_observed"], 0)
+                self.assertEqual(record["cleanup"]["group_probe"], "unknown")
+
     def test_scratch_cleanup_failure_is_explicit(self):
-        real_temp = tempfile.TemporaryDirectory(dir=self.repo)
-        self.addCleanup(real_temp.cleanup)
-        fake = SimpleNamespace(name=real_temp.name, cleanup=Mock(side_effect=OSError))
-        with patch.object(bridge.tempfile, "TemporaryDirectory", return_value=fake):
-            result = self.call()
-        self.assert_unavailable(result, "scratch_cleanup_failed")
-        self.assertEqual(result["scratch_cleanup"], "failed")
+        for mode in ("finding", "partial"):
+            with self.subTest(mode=mode):
+                real_temp = tempfile.TemporaryDirectory(dir=self.repo)
+                self.addCleanup(real_temp.cleanup)
+                fake = SimpleNamespace(name=real_temp.name, cleanup=Mock(side_effect=OSError))
+                with patch.object(bridge.tempfile, "TemporaryDirectory", return_value=fake):
+                    result = self.call(mode)
+                self.assert_unavailable(result, "scratch_cleanup_failed")
+                self.assertEqual(result["scratch_cleanup"], "failed")
+
+    def test_cancellation_after_validation_discards_complete_and_partial_evidence(self):
+        for mode in ("finding", "partial"):
+            with self.subTest(mode=mode):
+                real_temp = tempfile.TemporaryDirectory(dir=self.repo)
+                self.addCleanup(real_temp.cleanup)
+
+                def cancel_during_cleanup(real_temp=real_temp):
+                    real_temp.cleanup()
+                    signal.raise_signal(signal.SIGTERM)
+
+                fake = SimpleNamespace(name=real_temp.name, cleanup=cancel_during_cleanup)
+                stdout = io.StringIO()
+                with (
+                    patch.object(bridge.tempfile, "TemporaryDirectory", return_value=fake),
+                    redirect_stdout(stdout),
+                ):
+                    code = bridge.main(
+                        [
+                            "--repo",
+                            str(self.repo),
+                            "--revision",
+                            self.head,
+                            "--path",
+                            "safe.py",
+                            "--claude",
+                            self.executable(mode),
+                        ]
+                    )
+                result = json.loads(stdout.getvalue())
+                self.assertEqual(code, 1)
+                self.assert_unavailable(result, "interrupted")
+                self.assertEqual(result["scratch_cleanup"], "removed")
 
     def test_invalid_scope_revision_and_timeout_never_reach_claude(self):
         cases = [
