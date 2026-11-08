@@ -15,11 +15,14 @@ callers. Parent-directory symlinks, concurrent filesystem replacement, hostile
 SQLite files and remote filesystems are outside this trust assumption. No path
 discovery, directory creation or credential loading occurs. One connection belongs
 to one caller/thread; use separate `JobStore` objects for concurrent connections.
+Construction failures close any acquired connection before propagating.
 
 The database uses SQLite 3.37+ STRICT tables, `application_id = 0x52424A31`,
 `user_version = 1`, one clock row and one jobs table. Only an empty unversioned
 database is initialized. Other
 versions/applications or unrelated tables are refused; there is no migration.
+Version markers do not authenticate the schema. Operators must not edit store
+tables, constraints or triggers outside this API.
 SQLite transactions use `BEGIN IMMEDIATE`, FULL synchronous mode and a busy
 timeout from 0 through 1000 ms (default 1000). There is no event-history table.
 Busy timeout bounds SQLite's lock wait, not total filesystem/OS operation time.
@@ -154,8 +157,8 @@ These are local database observations, not power-loss durability, worker
 retirement, process-cleanup proof, model robustness or full service readiness.
 Independent Source review and exact-head CI remain separate delivery evidence.
 
-Pre-review local observations: 37 store methods and 165 existing management
-cases passed on each Python 3.11.15/3.14.3 (202 each). Disabled plugin autoload
+Pre-review local observations: 38 store methods and 165 existing management
+cases passed on each Python 3.11.15/3.14.3 (203 each). Disabled plugin autoload
 leaves the existing `asyncio_mode` configuration warning. Scoped Ruff lint,
 formatting, whitespace and management contracts passed. A local Hatchling wheel
 contains byte-identical module source; wheel-imported SQLite close/reopen and
@@ -165,3 +168,6 @@ An initial genuine Claude Source review found recovery reservation and retained
 outcome defects. Three new regression methods failed on that Source and passed
 after operation-specific recovery and savepoint isolation. Earlier evidence is
 retained separately; the corrected Source requires its own final review.
+Another confirmed constructor-interruption defect has a regression that failed
+before cleanup was corrected and passed afterward, including a real independent
+SQLite write-lock acquisition after the injected failure.

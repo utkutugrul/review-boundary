@@ -580,6 +580,42 @@ class StoreTests(unittest.TestCase):
         self.store.close()
         self.error("schema", JobStore, self.path)
 
+    def test_constructor_interruptions_close_owned_connection_and_release_write_lock(self):
+        real_connect = sqlite3.connect
+        for failure in (KeyboardInterrupt, SystemExit, RuntimeError):
+            with self.subTest(failure=failure):
+                connections = []
+
+                class InterruptedConnection(sqlite3.Connection):
+                    def execute(self, sql, parameters=(), failure=failure):
+                        if sql == "PRAGMA user_version":
+                            raise failure("synthetic initialization interruption")
+                        return super().execute(sql, parameters)
+
+                def connect(
+                    *args, _connections=connections, _factory=InterruptedConnection, **kwargs
+                ):
+                    connection = real_connect(*args, factory=_factory, **kwargs)
+                    _connections.append(connection)
+                    return connection
+
+                with (
+                    patch(
+                        "review_boundary.github_service_store.sqlite3.connect", side_effect=connect
+                    ),
+                    self.assertRaises(failure),
+                ):
+                    JobStore(self.path)
+                connection = connections[0]
+                try:
+                    with self.assertRaises(sqlite3.ProgrammingError):
+                        connection.execute("SELECT 1")
+                    with real_connect(self.path, timeout=0) as independent:
+                        independent.execute("BEGIN IMMEDIATE")
+                        independent.rollback()
+                finally:
+                    connection.close()
+
     def test_ambiguous_enqueue_before_and_after_commit_reserves_unknown_identity(self):
         for committed in (False, True):
             with self.subTest(committed=committed):

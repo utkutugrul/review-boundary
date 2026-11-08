@@ -247,13 +247,13 @@ class JobStore:
             if self._db.execute("SELECT count(*) FROM jobs").fetchone()[0] > MAX_RECORDS:
                 raise StoreError("schema")
             self._db.commit()
-        except (sqlite3.Error, StoreError) as error:
+        except BaseException as error:
             if hasattr(self, "_db"):
                 self._db.close()
             self._closed = True
-            if isinstance(error, StoreError):
-                raise
-            raise StoreError(self._sqlite_code(error)) from None
+            if isinstance(error, sqlite3.Error):
+                raise StoreError(self._sqlite_code(error)) from None
+            raise
 
     @staticmethod
     def _sqlite_code(error: sqlite3.Error) -> str:
