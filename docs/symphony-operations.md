@@ -63,8 +63,9 @@ Upstream in-memory blocked state clears on restart; labels/rechecks remain neede
 
 ## Review and delivery
 
-Codex app-server coordinates. Claude review/research is a real separate CLI
-invocation after its bridge ships. Record final source/diff identity, independent
+Codex app-server coordinates. Claude review/research uses the
+[ordinary CLI review procedure](claude-cli-review.md), independently of App Server.
+Record final source/diff identity, independent
 findings, actual checks and unknowns. Never relabel a Codex subagent as Claude.
 Leave a PR in status:review. Never automatically merge or publish gated approval/HOLD.
 Material risk remains WAIT for human acceptance. The application-test USD20 cap

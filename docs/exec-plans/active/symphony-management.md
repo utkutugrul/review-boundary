@@ -1,8 +1,8 @@
 # Symphony management and remaining milestones
 
-Status: Management scaffold validated offline; launch and first dispatch pending.
+Status: GH-13 pilot implementation prepared; real Claude review blocks delivery.
 These are the actual [repository issues](https://github.com/utkutugrul/review-boundary/issues).
-All lack dispatch:enabled. The previous agents have stopped, but #10/#11/#12 retain
+Other tasks remain disabled. The previous agents have stopped, but #10/#11/#12 retain
 manual handoff holds until their uncommitted sources are explicitly migrated.
 Null links are permitted only for future pending tasks.
 
@@ -75,15 +75,23 @@ Null links are permitted only for future pending tasks.
       "issue": "https://github.com/utkutugrul/review-boundary/issues/13",
       "owner": "Codex",
       "reviewer": "Claude",
-      "status": "backlog",
+      "status": "blocked",
       "dependencies": [],
       "acceptance": [
-        "Invokes the real ordinary Claude CLI independently with bounded ownership and sanitized structured evidence."
+        "Uses the installed ordinary Claude CLI with explicit frozen source scope and structured findings.",
+        "Verifies supported flags, disables tools and avoids source writes.",
+        "Bounds process lifetime/output and preserves unavailable outcomes and actual cleanup facts.",
+        "Binds coverage/findings to revision and scoped content identity for relevant-change reuse.",
+        "Separates coding-account usage from application budgets and excludes credentials from artifacts."
       ],
       "validation": [
         "Record scoped actual checks and independent final-source review in the issue/PR."
       ],
-      "evidence": []
+      "evidence": [
+        "GH-13 contract checks: 19 helper tests plus 47 management tests pass on Python 3.11 and 3.14 in an isolated neutral-name clone.",
+        "Installed Claude Code 2.1.319 help/version checked; real smoke and independent review remain unavailable pending separate authorization.",
+        "See gh-13-worklog.md for scope, observed failures, checks and delivery unknowns; material-risk acceptance remains WAIT."
+      ]
     },
     {
       "id": "process-14",
