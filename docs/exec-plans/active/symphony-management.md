@@ -303,8 +303,10 @@ matching actual #11 roles/dependencies before adding dispatch:enabled.
 ## Controlled native handoff
 
 This section preserves the historical proposal accepted by PR21. Manual12 was
-released and the real GH12 worker is now in its first Source-only phase. The
-pre-landing descriptions below grant no new dispatch or runtime authority.
+released and the initial GH12 worker entered a Source-only phase at that time.
+That worker has retired; the current registry and actual GitHub state govern any
+future promotion. The pre-landing descriptions below grant no new dispatch or
+runtime authority.
 
 The native file contract is [native-custody-inputs.json](native-custody-inputs.json),
 SHA-256 `c1d325b2836bd611719dff4adb50b1e51400d3ef146d6b729805441e683c8d00`. The operator must verify that committed identity, then
