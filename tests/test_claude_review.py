@@ -17,6 +17,21 @@ ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location("claude_review", ROOT / "scripts/claude_review.py")
 bridge = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(bridge)
+EXCLUDED_ENV = (
+    "UNRELATED_SECRET",
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_BASE_URL",
+    "ANTHROPIC_CUSTOM_HEADERS",
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "CLAUDE_CODE_USE_BEDROCK",
+    "CLAUDE_CODE_USE_VERTEX",
+    "CLAUDE_CONFIG_DIR",
+    "NODE_OPTIONS",
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+    "SYMPHONY_GITHUB_TOKEN",
+)
 
 
 @unittest.skipUnless(os.name == "posix", "The helper explicitly requires POSIX process groups")
@@ -68,6 +83,9 @@ class ClaudeReviewContract(unittest.TestCase):
             f"mode = {mode!r}\n"
             f"flags = {bridge.FLAGS!r}\n"
             "args = sys.argv[1:]\n"
+            f"assert not any(name in os.environ for name in {EXCLUDED_ENV!r})\n"
+            "if mode == 'assert_user': assert os.environ.get('USER') == 'fixture-review-user'\n"
+            "if mode == 'assert_no_user': assert 'USER' not in os.environ\n"
             "if args == ['--version']:\n"
             "    if mode == 'version_timeout': time.sleep(60)\n"
             "    print('private failure' if mode == 'version_bad' else '2.1.319 (Claude Code)')\n"
@@ -84,11 +102,9 @@ class ClaudeReviewContract(unittest.TestCase):
             "assert args[args.index('--model') + 1] == 'sonnet'\n"
             "assert args[len(flags)] == '--system-prompt'\n"
             "assert args[-2] == '--json-schema'\n"
-            "assert not any(n in os.environ for n in [\n"
-            "    'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'SYMPHONY_GITHUB_TOKEN',\n"
-            "    'CLAUDE_CONFIG_DIR', 'UNRELATED_SECRET'])\n"
             "assert not os.path.exists('safe.py')\n"
-            "if mode == 'blocked_input': time.sleep(60)\n"
+            "if mode == 'blocked_input':\n"
+            "    os.write(1, b'blocked-input-ready'); time.sleep(60)\n"
             "request = json.load(sys.stdin)\n"
             "schema = json.loads(args[-1])\n"
             "assert schema['properties']['revision']['const'] == request['revision']\n"
@@ -170,16 +186,7 @@ class ClaudeReviewContract(unittest.TestCase):
     def test_positive_binding_flags_environment_and_cleanup(self):
         with patch.dict(
             os.environ,
-            {
-                name: "fixture-only"
-                for name in (
-                    "UNRELATED_SECRET",
-                    "ANTHROPIC_API_KEY",
-                    "ANTHROPIC_AUTH_TOKEN",
-                    "SYMPHONY_GITHUB_TOKEN",
-                    "CLAUDE_CONFIG_DIR",
-                )
-            },
+            dict.fromkeys(EXCLUDED_ENV, "fixture-only"),
         ):
             result = self.call("finding")
         self.assertEqual(result["status"], "completed", result)
@@ -197,6 +204,23 @@ class ClaudeReviewContract(unittest.TestCase):
             self.assertEqual(process["cleanup"]["group_probe"], "absent")
             self.assertTrue(process["stdout_eof"] and process["stderr_eof"])
         self.assertFalse(list(self.repo.glob("claude-review-*")))
+
+    def test_existing_user_identity_is_optional_and_secrets_stay_excluded(self):
+        for user, mode in (("fixture-review-user", "assert_user"), (None, "assert_no_user")):
+            with self.subTest(user=user):
+                with patch.dict(os.environ, dict.fromkeys(EXCLUDED_ENV, "fixture-only")):
+                    if user is None:
+                        os.environ.pop("USER", None)
+                    else:
+                        os.environ["USER"] = user
+                    result = self.call(mode)
+                self.assertEqual(result["status"], "completed", result)
+                self.assertEqual(
+                    [p["stage"] for p in result["processes"] if p["stage"] != "source"],
+                    ["version", "help", "review"],
+                )
+                self.assertNotIn("fixture-only", json.dumps(result))
+                self.assertNotIn("fixture-review-user", json.dumps(result))
 
     def test_dirty_and_untracked_files_are_not_reviewed_or_modified(self):
         dirty = "Changed after commit.\n"
@@ -322,11 +346,54 @@ class ClaudeReviewContract(unittest.TestCase):
                 )
 
     def test_blocked_stdin_does_not_escape_the_deadline(self):
-        (self.repo / "safe.py").write_text("x" * 60000)
-        self.head = self.commit()
-        result = self.call("blocked_input", timeout=0.4)
+        args = self.args("blocked_input", timeout=1)
+        real_popen = bridge.subprocess.Popen
+        filled = []
+
+        def backpressured_popen(argv, **kwargs):
+            process = real_popen(argv, **kwargs)
+            if args.claude in argv and "--print" in argv:
+                # Fill the actual pipe while the trusted child never reads it.
+                # EAGAIN, rather than a guessed capacity, establishes backpressure.
+                try:
+                    os.set_blocking(process.stdin.fileno(), False)
+                    written = 0
+                    while True:
+                        try:
+                            written += os.write(process.stdin.fileno(), b"x" * 4096)
+                        except BlockingIOError:
+                            filled.append(written)
+                            break
+                except BaseException:
+                    bridge.cleanup(process)
+                    for stream in (process.stdin, process.stdout, process.stderr):
+                        stream.close()
+                    raise
+            return process
+
+        began = time.monotonic()
+        with patch.object(bridge.subprocess, "Popen", side_effect=backpressured_popen):
+            result = bridge.review(args)
+        elapsed = time.monotonic() - began
         self.assert_unavailable(result, "timeout")
-        self.assertFalse(result["processes"][-1]["stdin_complete"])
+        self.assertEqual(len(filled), 1)
+        self.assertGreater(filled[0], 0)
+        self.assertGreaterEqual(elapsed, args.timeout)
+        self.assertLess(elapsed, 3)
+        record = result["processes"][-1]
+        self.assertEqual(record["stage"], "review")
+        self.assertEqual(record["failure"], "timeout")
+        self.assertEqual(record["stdout_bytes_observed"], len(b"blocked-input-ready"))
+        self.assertFalse(record["stdin_complete"])
+        self.assertIsNone(record["returncode"])
+        self.assertEqual(record["cleanup"]["term"], "sent")
+        self.assertEqual(record["cleanup"]["kill"], "sent")
+        self.assertEqual(record["cleanup"]["ownership"], "retained_until_signals")
+        self.assertTrue(record["cleanup"]["leader_reaped"])
+        self.assertEqual(record["cleanup"]["leader_returncode"], -signal.SIGKILL)
+        self.assertEqual(record["cleanup"]["group_probe"], "absent")
+        self.assertEqual(result["scratch_cleanup"], "removed")
+        self.assertFalse(list(self.repo.glob("claude-review-*")))
 
     def test_cleanup_denial_does_not_become_absent_when_leader_is_reaped(self):
         process = Mock(pid=12345, returncode=None)

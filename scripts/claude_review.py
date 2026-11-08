@@ -566,11 +566,11 @@ def review(args):
         require(executable is not None, "claude_unavailable")
         executable = str(Path(executable).absolute())
         scratch = tempfile.TemporaryDirectory(prefix="claude-review-", dir=repo)
-        # Normal account login stays inside the real CLI. No API keys, endpoints,
+        # USER lets the CLI select the existing OS login. No API keys, endpoints,
         # configuration overrides, GitHub tokens or conversation state are inherited.
         env = {
             name: os.environ[name]
-            for name in ("HOME", "PATH", "LANG", "TMPDIR")
+            for name in ("HOME", "PATH", "LANG", "TMPDIR", "USER")
             if name in os.environ
         }
         env["TERM"] = "dumb"

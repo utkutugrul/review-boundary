@@ -75,7 +75,7 @@ Null links are permitted only for future pending tasks.
       "issue": "https://github.com/utkutugrul/review-boundary/issues/13",
       "owner": "Codex",
       "reviewer": "Claude",
-      "status": "blocked",
+      "status": "review",
       "dependencies": [],
       "acceptance": [
         "Uses the installed ordinary Claude CLI with explicit frozen source scope and structured findings.",
@@ -88,8 +88,8 @@ Null links are permitted only for future pending tasks.
         "Record scoped actual checks and independent final-source review in the issue/PR."
       ],
       "evidence": [
-        "GH-13 contract checks: 24 helper tests plus 47 management tests pass on Python 3.11 and 3.14 in the actual GH-13 workspace; production dispatch checks are unchanged.",
-        "Installed Claude Code 2.1.319 help/version verify required flags including --model; the fixed public alias is sonnet. Real smoke and independent review remain pending the operator's separately authorized run.",
+        "GH-13 follow-up: 25 helper controls plus 47 management tests pass on Python 3.11.15 and 3.14.10; repository Ruff lint/format and management checks pass. Production dispatch checks are unchanged.",
+        "Installed Claude Code 2.1.319 help/version previously verified required flags and public --model sonnet. The operator's frozen-source attempt was unavailable/process_exit with safe category missing_login, confirmed cleanup and unchanged source; it was not a review pass. USER propagation and deterministic real-pipe backpressure controls are corrected for the authorized operator rerun.",
         "See gh-13-worklog.md for scope, observed failures, checks and delivery unknowns; material-risk acceptance remains WAIT."
       ]
     },

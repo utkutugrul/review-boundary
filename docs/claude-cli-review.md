@@ -43,8 +43,10 @@ The helper reads Git objects, never worktree source or ignored/untracked context
 It does not inspect user documents, conversation history, credentials or account
 settings. The real CLI owns its existing normal account authentication. API
 credentials, custom endpoint variables, GitHub tokens and CLI configuration
-environment overrides are not forwarded. HOME/PATH/LANG/TMPDIR are retained for
-the normal installed CLI; the helper does not inspect their contents.
+environment overrides are not forwarded. HOME/PATH/LANG/TMPDIR and the existing
+non-secret USER are retained when present. USER lets the CLI select its existing
+OS login; omitting it can make a logged-in normal account appear unavailable.
+The helper does not invent an identity or inspect account files.
 
 Select at most 32 regular UTF-8 files, each at most 64 KiB. Current plus base
 contents total at most 192 KiB. Paths use letters, numbers, `_`, `.`, `/`, `-`,
@@ -118,7 +120,8 @@ selected paths and current/base blob identities. Unrelated commits preserve it;
 changed source, base context, scope or helper changes it. Do not rerun unchanged
 completed scope. Keep the original reviewed revision and the new manifest as an
 applicability record; never rewrite a prior review as if Claude reviewed a newer
-commit. Changed context or an unavailable review needs a newly authorized review.
+commit. Changed context or an unavailable review needs a review within the
+owner's authorized scope; existing authorization remains valid within that scope.
 Matching hashes prove content identity, not report authenticity or correctness.
 Recheck CLI/host-policy compatibility when changing hosts.
 
