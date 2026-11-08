@@ -51,7 +51,9 @@ from pathlib import Path
 from review_boundary.workflow_dashboard import render_workflow_dashboard, write_workflow_dashboard
 
 html = render_workflow_dashboard(report_bytes, expected=original_expected_roster)
-write_workflow_dashboard(Path("run.json"), Path("new-dashboard.html"), expected=original_expected_roster)
+write_workflow_dashboard(
+    Path("run.json"), Path("new-dashboard.html"), expected=original_expected_roster
+)
 ```
 
 `expected` is optional. Supplying the original declaration detects roster
