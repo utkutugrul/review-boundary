@@ -1,8 +1,10 @@
 # Symphony management and remaining milestones
 
-Status: active delivery. Reviewer task13 and workflow core11 are delivered through
-PR20 and PR22; PR21 accepted the disjoint core/native custody contracts. Native12
-is in a managed Source-only phase. Corpus16 is blocked after automatic research
+Status: active delivery. Workflow core11 and the original reviewer capability
+were delivered through PR22 and PR20. Reviewer13 is explicitly reopened for
+partial-review evidence retention. PR21 accepted the disjoint core/native custody
+contracts; Native12 Source-only work waits for that reviewer follow-up. Corpus16
+is blocked after automatic research
 review refusals; its existing Claude-led research is preserved. Only PyJWT is
 currently admitted.
 These are the actual [repository issues](https://github.com/utkutugrul/review-boundary/issues).
@@ -99,7 +101,7 @@ permitted only for future pending tasks.
       "issue": "https://github.com/utkutugrul/review-boundary/issues/13",
       "owner": "Codex",
       "reviewer": "Claude",
-      "status": "done",
+      "status": "ready",
       "dependencies": [],
       "acceptance": [
         "Uses the installed ordinary Claude CLI with explicit frozen source scope and structured findings.",
@@ -107,16 +109,19 @@ permitted only for future pending tasks.
         "Bounds process lifetime/output and preserves unavailable outcomes and actual cleanup facts.",
         "Binds coverage/findings to revision and scoped content identity for relevant-change reuse.",
         "Separates coding-account usage from application budgets and excludes credentials from artifacts.",
-        "Refuses mixed live/offline claim modes before access and preserves deadline diagnostics while redacting invalid JSON details."
+        "Refuses mixed live/offline claim modes before access and preserves deadline diagnostics while redacting invalid JSON details.",
+        "Retains schema- and source-validated partial review evidence separately while incomplete results remain unavailable and never imply approval."
       ],
       "validation": [
-        "Record scoped actual checks and independent final-source review in the issue/PR."
+        "Record scoped actual checks and independent final-source review in the issue/PR.",
+        "Verify evidence retention with trusted keyless CLI fixtures on both supported runtimes, preserving invalid-result, denial, cancellation and cleanup refusals."
       ],
       "evidence": [
-        "Delivered through owner-authorized PR20 squash merge 4bc0110146c84467b870d5efaba5bc828a2989fb. Reviewed head ec5a3063aca4c451d82ddf5f691cd2c8f6a68907 and merged tree match; issue13 is closed.",
+        "Delivered through owner-authorized PR20 squash merge 4bc0110146c84467b870d5efaba5bc828a2989fb. Reviewed head ec5a3063aca4c451d82ddf5f691cd2c8f6a68907 and merged tree match; issue13 was closed at that delivery; its follow-up is explicitly reopened below.",
         "Root passed152management cases on each supported local Python runtime. Final genuine ordinary Claude current/base delta review completed without findings or permission denials; all nine supervised groups retired and scratch removed.",
         "Actual final PR20 CI passed3948Python tests and63subtests per supported runtime,78browser tests and all active checks. Earlier URL-parser and redaction failures were corrected and their historical receipts retained.",
-        "See gh-13-worklog.md for detailed Source evolution, observed failures and scoped limitations. This coding-account CLI capability does not perform an application-provider benchmark or establish OS containment."
+        "See gh-13-worklog.md for detailed Source evolution, observed failures and scoped limitations. This coding-account CLI capability does not perform an application-provider benchmark or establish OS containment.",
+        "Root explicitly reopens this record for issue13 after an actual Native12 incomplete review lost its validated structured output. The new helper/test/procedure follow-up is Source and keyless validation only until independent technical review; original PR20 delivery remains accepted."
       ]
     },
     {
@@ -231,8 +236,10 @@ worker rechecks remain required. Claude-led work needs the real CLI bridge;
 a role label alone cannot supply it. Current dirty worktrees stay excluded until
 explicit ownership handoff.
 
-Next: finish Native12 Source corrections and independent review before a bounded
-technical execution decision. Corpus16 dispatch stays off pending a relevant
+Next: finish the reopened reviewer13 evidence-retention follow-up, then recheck
+its actual closed state before promoting Native12. Complete Native12 Source
+corrections and independent review before a bounded technical execution decision.
+Corpus16 dispatch stays off pending a relevant
 external review-state change; its scope and acceptance criteria are unchanged.
 Core11 is delivered, while14/15/17/18 retain their actual dependencies. Recheck
 each task's actual role, dependency record and accepted inputs before promotion.
