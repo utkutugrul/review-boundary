@@ -17,6 +17,7 @@ from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_ope
 REPOSITORY = "utkutugrul/review-boundary"
 ISSUE_URL = f"https://github.com/{REPOSITORY}/issues/"
 STATUSES = {"backlog", "ready", "active", "review", "blocked"}
+PLAN_STATUSES = STATUSES | {"done"}
 FIELDS = {
     "id",
     "title",
@@ -44,6 +45,10 @@ MAX_INPUT = 256 * 1024
 
 class ManagementError(ValueError):
     """An actionable contract refusal without dumping supplied task bodies."""
+
+
+class LiveDeadlineExceeded(ManagementError):
+    """Keep the fixed deadline refusal distinct from untrusted JSON errors."""
 
 
 def require(condition, message):
@@ -212,7 +217,7 @@ def check_tasks(tasks):
             f"task {task_id}: assign distinct Codex/Claude owner and reviewer",
         )
         require(
-            type(task["status"]) is str and task["status"] in STATUSES,
+            type(task["status"]) is str and task["status"] in PLAN_STATUSES,
             f"task {task_id}: unsupported status",
         )
         if task["issue"] is None:
@@ -321,13 +326,23 @@ def issue_contract(body):
         "issue Acceptance criteria: add a concrete checklist",
     )
     text = sections["Dependencies"]
-    urls = re.findall(r"https://github\.com/[^/\s)]+/[^/\s)]+/issues/\d+", text)
-    require(
-        all(url.startswith(ISSUE_URL) for url in urls),
-        "issue Dependencies: only this repository is supported",
+    # Whitespace and Markdown wrappers delimit whole URL tokens. A canonical
+    # prefix cannot authorize a URL with a suffix, query or fragment.
+    url_token = r"(?<![^\s<>()\[\]])https://[^\s<>()\[\]]+"
+    urls = re.findall(url_token, text)
+    message = (
+        "issue Dependencies: unsupported issue-reference form; use bare #N or canonical issue URLs"
     )
+    require(all(re.fullmatch(re.escape(ISSUE_URL) + r"[1-9][0-9]*", url) for url in urls), message)
     dependencies = {issue_number(url) for url in urls}
-    dependencies.update(int(n) for n in re.findall(r"(?<![\w/])#([1-9]\d*)\b", text))
+    remaining = re.sub(url_token, "", text)
+    bare_reference = r"(?<![\w/.-])#([1-9][0-9]*)(?=$|[\s,\])>]|\.(?:\s|$))"
+    dependencies.update(int(n) for n in re.findall(bare_reference, remaining))
+    remaining = re.sub(bare_reference, "", remaining)
+    require(
+        not re.search(r"#|\bGH-[0-9]|[/\\:]|\b[\w-]+\.[\w-]", remaining, re.IGNORECASE),
+        message,
+    )
     require(
         dependencies or re.match(r"^None(?:[.\s]|$)", text, re.IGNORECASE),
         "issue Dependencies: use None or explicit same-repository issue references",
@@ -476,7 +491,7 @@ def _live_deadline(enabled):
     )
 
     def expired(_signum, _frame):
-        raise ManagementError("live GitHub: absolute ten-second deadline exceeded")
+        raise LiveDeadlineExceeded("live GitHub: absolute ten-second deadline exceeded")
 
     try:
         previous = signal.signal(signal.SIGALRM, expired)
@@ -542,6 +557,8 @@ def fetch_live_snapshot(number, *, token, open_url=None, clock=time.monotonic, n
             require(clock() - began <= 10, "live GitHub: aggregate deadline exceeded")
             try:
                 value = decode_json(raw.decode("utf-8"))
+            except LiveDeadlineExceeded:
+                raise
             except (ValueError, UnicodeError):
                 raise ManagementError(
                     "live GitHub: invalid JSON response; details omitted"
@@ -587,8 +604,9 @@ def fetch_live_snapshot(number, *, token, open_url=None, clock=time.monotonic, n
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", type=Path, default=Path.cwd())
-    parser.add_argument("--issue-snapshot", type=Path)
-    parser.add_argument("--require-live-claim", action="store_true")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--issue-snapshot", type=Path)
+    mode.add_argument("--require-live-claim", action="store_true")
     args = parser.parse_args(argv)
     try:
         tasks = check_repo(args.repo)
@@ -616,8 +634,18 @@ def main(argv=None):
             number = check_live_claim(
                 data, expected_issue=expected_issue, manual_claims=claims, tasks=tasks
             )
-            print(f"Repository contracts OK; supplied GH-{number} data passes live-claim checks.")
-            print("This does not authenticate GitHub data or authorize promotion.")
+            if args.issue_snapshot:
+                print(f"Repository contracts OK; offline snapshot GH-{number} passes claim checks.")
+                print(
+                    "File-supplied data does not authenticate GitHub data or its observation time."
+                )
+            else:
+                print(
+                    f"Repository contracts OK; live GitHub fetch GH-{number} passes claim checks."
+                )
+            print(
+                "Validation does not authorize promotion; explicit operator dispatch is required."
+            )
         else:
             print(f"Repository contracts OK ({len(tasks)} tasks); dispatch NOT checked.")
         return 0

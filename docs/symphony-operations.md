@@ -42,6 +42,9 @@ Workers recheck before code. required_labels only filters labels.
 The gate requires issue roles and dependency references to match the versioned
 plan. Update and review both records when changing scope; editing the issue body
 alone cannot remove a dependency or switch its delivery roles.
+Plan status is coordination metadata, not another dispatch authorization gate.
+Registered roles/dependencies, manual claims and fresh GitHub state/labels form
+the gate; explicit operator promotion remains required.
 
 Use host github_api GET /repos/utkutugrul/review-boundary/issues/N and every dependency.
 Build a private snapshot from actual responses using only:
@@ -54,8 +57,14 @@ Do not retain unrelated fields/tokens. Maximum256KiB, age at most five minutes,
 clock skew at most five seconds. Run:
 rtk proxy python3 scripts/check_project_management.py --repo . --issue-snapshot /path/to/private-snapshot.json
 
-A pass validates supplied data only, not API authenticity or observation time.
-A fabricated/offline fixture is never live dependency evidence. Live mode adds only bounded GETs, never labels, promotion or scheduling.
+A pass prints `offline snapshot GH-N` and validates supplied data only, not API
+authenticity or observation time. A fabricated/offline fixture is never live
+dependency evidence. `--require-live-claim` instead fetches actual issue data and
+prints `live GitHub fetch GH-N` only after the fetched claim passes validation.
+The two flags are mutually exclusive; combining them fails during argument
+parsing before file reads, credential access or network requests. Both modes
+still require explicit operator promotion. Live mode adds only bounded GETs,
+never labels, promotion or scheduling.
 
 Blocked/review removes dispatch:enabled after saving evidence. No automatic
 promotion/resumption. Removing a required label may stop the current session.
@@ -63,8 +72,9 @@ Upstream in-memory blocked state clears on restart; labels/rechecks remain neede
 
 ## Review and delivery
 
-Codex app-server coordinates. Claude review/research is a real separate CLI
-invocation after its bridge ships. Record final source/diff identity, independent
+Codex app-server coordinates. Claude review/research uses the
+[ordinary CLI review procedure](claude-cli-review.md), independently of App Server.
+Record final source/diff identity, independent
 findings, actual checks and unknowns. Never relabel a Codex subagent as Claude.
 Leave a PR in status:review. Never automatically merge or publish gated approval/HOLD.
 Material risk remains WAIT for human acceptance. The application-test USD20 cap
@@ -87,6 +97,9 @@ It has no gh/global-auth lookup, label mutation, scheduling or daemon. Missing
 credential/data fails closed. The host hook inherits configured environment;
 the tracker declares its token variable for removal from the later Codex child.
 Verify actual host/config compatibility before activation. No auth was read here.
+Expiry during JSON decoding retains the fixed absolute-deadline diagnostic.
+Malformed JSON, duplicate keys and invalid encoding retain the fixed invalid-JSON
+refusal without response contents or key names.
 The timer/socket bounds are implemented, not runtime evidence of DNS interruption
 or process retirement on every platform. Keep dispatch off until supported host
 behavior is reviewed and verified; do not claim a hard DNS/cleanup guarantee.
