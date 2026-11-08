@@ -4,8 +4,8 @@ Status: active project delivery. The OPS10 setup milestone, CORE11, CLAUDE13
 and standalone workflow report contract28 are delivered. PR21 accepted the
 disjoint core/native custody contracts. Native50 has scoped acceptance; Native12
 now prepares the SDK231 Source packet, with broader runtime and delivery work
-still open. Dashboard32 is a preparatory split of existing REPORTS15 UI scope;
-fresh-process execution and shared product integration retain their prerequisites.
+still open. Standalone Dashboard32 is delivered; full REPORTS15, fresh-process
+execution and shared product integration retain their open scope and prerequisites.
 Corpus16 remains blocked after automatic research review refusals; its research
 is preserved and only PyJWT is admitted.
 These are the actual [repository issues](https://github.com/utkutugrul/review-boundary/issues).
@@ -186,7 +186,7 @@ Null links are permitted only for future pending tasks.
       "issue": "https://github.com/utkutugrul/review-boundary/issues/32",
       "owner": "Codex",
       "reviewer": "Claude",
-      "status": "backlog",
+      "status": "done",
       "dependencies": [
         "claude-13",
         "workflow-report-contract"
@@ -205,8 +205,11 @@ Null links are permitted only for future pending tasks.
         "Obtain one genuine ordinary Claude Source review over final code and necessary unchanged report/renderer context, separate from fixture/browser/asset validation. Preserve partial coverage, findings and actual cleanup; exact-head CI and Root acceptance remain required."
       ],
       "evidence": [
-        "Root created actual issue32 as backlog with dispatch disabled. Its body binds Codex implementation, Claude review and dependencies13/28; this plan binding does not promote or implement it.",
-        "All seven new paths are absent at base029cec3db7529f97de9c7c168b14049443a8eeda. Implementation, package/browser/screenshot evidence and final delivery remain pending."
+        "Delivered by PR34 squash merge 4316e68f901cfd587341490171a64ff8b15fdb5c, tree cb6e195b79a7b4f5ac9476eca2bab79c09b0ef1d equal reviewed head be7a9cd3fdcc0263dd78653669c4fc1f2feb6e43. Actual issue32 is closed with dispatch disabled; roles and dependencies 13/28 are preserved.",
+        "The seven new dashboard paths are delivered. Root separately authorized one existing CI-test assertion addition for the sixth browser suite; exact roster equality and provider protections remain intact. Current exact-head CI passed 4390 Python tests plus 113 subtests per supported runtime and 84 Node tests per job, with 12 successful checks and two conditional publisher skips.",
+        "Completed genuine ordinary Claude production review key 95bedb4715293cbbd04c9091f02a7920f9c7915138a99a1e9102a7cc84a2994b retains its six-path Source scope and limitations. The separate final CI-roster review key af7da6c9fe66107684aba844c9729b627849c335c0d3ff791540ed4c53d981b9 completed over three paths without findings or permission denials, with nine groups retired, both EOFs and scratch removed. Earlier partial reviews and failed attempts remain preserved.",
+        "Wheel/sdist and installed keyless demos verified packaged assets and byte-equal output. Root accepted actual browser filters, summary preservation, reset, themes, details, incomplete sessions, 390px layout and JSON export; PNG SHA256 72fefdea519826d3182cedd4a30fb2162a4c4686a05a369b0f2d1f9ef129008a is the actual final-renderer capture.",
+        "This completes only standalone Dashboard32. Full REPORTS15 remains open with dependencies 14/28/32, including common CLI/export/compare/adjudication and fresh-process integration. Native12, PROCESS14 and benchmark18 remain open; no model robustness or whole-project completion is claimed."
       ]
     },
     {

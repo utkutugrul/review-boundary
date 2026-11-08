@@ -816,7 +816,7 @@ def test_live_claim_cannot_change_the_versioned_task_contract(change):
     ],
 )
 def test_workflow_dashboard_claim_keeps_roles_dependencies_and_promotion_gate(change, message):
-    # Offline fixtures exercise the issue32 binding without promoting its backlog issue.
+    # Only an explicit offline plan reopening can exercise a delivered task's live claim.
     value = snapshot()
     value["issue"].update(
         number=32,
@@ -833,6 +833,11 @@ def test_workflow_dashboard_claim_keeps_roles_dependencies_and_promotion_gate(ch
         for n in (13, 28)
     ]
     tasks = registered_tasks()
+    with pytest.raises(management.ManagementError, match="completed plan task"):
+        management.check_live_claim(
+            value, tasks=tasks, expected_issue=32, manual_claims=[10], now=NOW
+        )
+    next(task for task in tasks if task["id"] == "workflow-dashboard")["status"] = "ready"
     assert (
         management.check_live_claim(
             value, tasks=tasks, expected_issue=32, manual_claims=[10], now=NOW
