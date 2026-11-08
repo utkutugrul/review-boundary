@@ -162,7 +162,7 @@ permitted only for future pending tasks.
       "issue": "https://github.com/utkutugrul/review-boundary/issues/16",
       "owner": "Claude",
       "reviewer": "Codex",
-      "status": "ready",
+      "status": "active",
       "dependencies": [],
       "acceptance": [
         "Independent real cases have verified provenance, meaningful ground truth and honest source-group counts."
@@ -237,8 +237,8 @@ No old native private operator is automatically adopted or executed. See [plan r
 [operations](../../symphony-operations.md).
 
 Migration: new implementation/research goes through Symphony/GitHub, with one
-writer per issue/scope. Accepted landing releases only completed manual claims11
-and12. Claim10 remains held while the operator finishes management work. A plan
+writer per issue/scope. Accepted PR21 landing released completed manual claims11 and12. Claim10
+remains held while the operator finishes management work. A plan
 status coordinates open work; a terminal done record must be explicitly reopened
 in the versioned plan. Neither status grants a runtime claim or dispatch authority.
 Actual operating/review evidence is recorded in issues10/13; offline checks do
@@ -285,6 +285,10 @@ from these hashes. The operator requires #13 closed, the accepted registry and
 matching actual #11 roles/dependencies before adding dispatch:enabled.
 
 ## Controlled native handoff
+
+This section preserves the historical proposal accepted by PR21. Manual12 was
+released and the real GH12 worker is now in its first Source-only phase. The
+pre-landing descriptions below grant no new dispatch or runtime authority.
 
 The native file contract is [native-custody-inputs.json](native-custody-inputs.json),
 SHA-256 `c1d325b2836bd611719dff4adb50b1e51400d3ef146d6b729805441e683c8d00`. The operator must verify that committed identity, then
