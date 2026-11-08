@@ -1,56 +1,67 @@
 # GH-13 worklog
 
-Scope: repository-owned ordinary Claude CLI review helper, focused contract tests,
-and English operating documentation. Codex implements; real Claude independently
-reviews. Human owner: utkutugrul. No changes to #10/#11/#12 or dispatch gates.
+Scope: ordinary Claude CLI review helper, focused contract tests, English
+procedure, GH-13 plan evidence, and one management-test fixture correction.
+Codex implements; real Claude independently reviews. Human owner: utkutugrul.
+Production dispatch checks and #10/#11/#12 remain unchanged.
 
-## Claim and ownership
+## Claim and continuation
 
-- Actual host github_api observation at 2026-11-08T03:48:21Z: GH-13 open, assigned
-  to utkutugrul, with
-  symphony, owner:codex, review:claude, status:ready and dispatch:enabled.
-- No dependencies in the actual issue or versioned plan. Manual claims exclude
-  #10/#11/#12. Supplied live snapshot passed the repository checker before code.
-- Base: 6b7efd375e2c77380dc513e2f4304aa154ec1827. Fresh GH-13 workspace was clean.
-- Local Git ref creation failed because metadata is read-only. Approved native
-  github_api created codex/gh-13-independent-claude-review at that base instead.
-- The operator maintains canonical work_state outside this child; no external
-  state update is claimed here. Handoff requires status:blocked and no dispatch.
+- Actual host github_api observation at 2026-11-08T04:12:27Z: GH-13 open,
+  assigned to utkutugrul, with symphony, owner:codex, review:claude,
+  status:active and dispatch:enabled. No dependencies in the issue or plan.
+  The bounded actual-response snapshot passed the checker before source edits.
+- Continue PR #20 and codex/gh-13-independent-claude-review from immutable
+  6f4800c73f9d19fa7345335a2926f53c263c8f80. All initial scoped local files
+  matched that commit. Comparison base: 6b7efd375e2c77380dc513e2f4304aa154ec1827.
+- Read owner comment 6717013530. No new delivery branch, task promotion,
+  dispatch enablement, automatic merge, or takeover of manual claims.
+- Local Git metadata remains read-only. Publication uses the approved native
+  repository-scoped GitHub API on the existing branch and standard PR.
+- The operator maintains canonical work_state outside this child. Only this
+  bounded worklog and GitHub issue are maintained here; no external update is claimed.
 
-## Implementation and evidence
+## Corrections and actual evidence
 
-- Installed ordinary Claude CLI reports 2.1.319. Local --help and official CLI
-  documentation were inspected; these probes are not a live model review.
-- Implemented a stdlib-only helper reading explicitly selected immutable Git
-  blobs, with base context, content/mode hashes, coverage and finding bounds.
-- CLI subprocesses use nonblocking bounded pipes, a shared deadline, fresh POSIX
-  groups, TERM/KILL and actual cleanup observations. Missing/partial/refused
-  reviews stay unavailable; raw CLI errors and account metadata are discarded.
-- Source inspection found cancellation must defer through child acquisition;
-  standalone SIGINT/SIGTERM now request cancellation without interrupting cleanup.
-- Runtime helper contract tests use trusted fake executables only. Nineteen tests
-  cover positive findings and negative scope, flag, refusal, denial, malformed
-  output, output bounds, timeout, blocked stdin, descendants and cleanup cases.
-- Focused helper plus existing management suite: 66 passed on Python 3.11.15
-  and Python 3.14.10 in an isolated neutral-name clone with identical scoped
-  source. Pytest warned that asyncio_mode was unknown because plugin autoload
-  was disabled; neither focused suite needs that plugin. No package installed.
-- Initial run in GH-13: 65 passed, one existing management test failed because
-  it assumes the checkout basename is not GH-N. The gate correctly refused a
-  missing explicit host credential. The checker/test was not modified.
-- Repository project-management checker passed. Frozen-source describe-only
-  invocation passed without launching Claude. AST parsing and diff whitespace
-  checks passed. These do not establish model behavior.
-- Ruff is unavailable on PATH; the offline tool runner could not initialize its
-  cache under sandbox permissions. Lint/format and the full application suite
-  are unverified here. No install or broader sandbox was requested.
+- Pin the normal public alias with --model sonnet and verify --model in help.
+  Installed Claude Code 2.1.319 version/help probes passed with every required
+  flag, no model request, and observed group cleanup. Static declarations do
+  not establish real review behavior or permission-denial results.
+- A trusted stdlib Python supervisor retains the group leader until TERM/KILL
+  finish. Command exit travels through a separate bounded pipe that the command
+  cannot inherit. No parent poll or wait reaps the supervisor before signals.
+  Command and supervisor return codes remain distinct. Signal zero delivers
+  no signal; remaining groups, denials and uncertain retirement stay unavailable.
+- An initial waitid implementation failed portability on Python 3.11 on this
+  host and received denied signals for exited groups. It was replaced with the
+  supervisor; no failed observation was relabeled as a successful check.
+- Preserve all original positive/negative controls. Add controls for model-flag
+  refusal, early reaping, already reaped handles, automatic-reaping hosts,
+  missing/invalid/overflowed supervisor status, and command launch failure.
+- The management negative test now uses an explicit invalid temporary workspace
+  and the real repository contract result. Existing valid GH-N, identity-fault,
+  manual-claim and dependency controls remain. Production gate bytes are unchanged.
+- Python 3.11.15 and 3.14.10: 24 helper tests and 47 management tests pass in
+  the actual GH-13 workspace, 71 per version. Existing pytest is reused with
+  plugin autoload disabled; its asyncio_mode warning is unrelated to these suites.
+- Ruff 0.17.4 reproduced the original F401/format failure. The import is now used
+  by the supervisor. Repository lint and format checks pass after correction.
+  Repository management checks pass. No lint/tool unavailability is claimed.
+- Full Python 3.14 application-suite attempt stopped at collection: 48 errors
+  from missing application dependencies including inspect_ai and jsonschema.
+  No full-suite pass, dependency install, provider request or benchmark is claimed.
 
-## Outstanding gates
+## Frozen handoff and outstanding gates
 
-- Separately authorized frozen-source normal-CLI smoke and independent final
-  Claude review, including subprocess lifetime, binding and refusal handling.
-- No live model request or independent Claude pass is claimed. The exact source
-  revision, PR and operator review request belong in the linked GH-13 handoff.
-- Reviewable draft PR and exact source revision via the native GitHub API.
-- Material-risk delivery remains WAIT for explicit human owner acceptance.
-- No application benchmarks, provider keys, daemon, install or auth changes.
+- The exact published source revision, validation evidence, full review scope
+  and PR are recorded in GH-13 and PR #20. Run the helper from that revision;
+  describe-only evidence launches no Claude process and is not a review.
+- The operator must perform the separately authorized normal-Claude smoke and
+  final independent review of lifetime, source binding and refusal handling.
+  Require a structured source-bound result, zero CLI permission denials and
+  confirmed cleanup. Mocked executable results never satisfy this gate.
+- Keep GH-13 open and blocked with dispatch disabled until required live evidence
+  is verified. PR #20 is standard and reviewable. Material-risk delivery remains
+  WAIT for explicit human owner acceptance.
+- Coding-account usage is separate from the USD20 application benchmark cap.
+  No application benchmarks, credentials, daemon, install or auth changes.

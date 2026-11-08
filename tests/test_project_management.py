@@ -282,8 +282,12 @@ def test_before_run_cannot_drop_live_claim_gate():
         management.check_config(config)
 
 
-def test_unbound_manual_workspace_cannot_run_live_gate(capsys):
-    assert management.main(["--repo", str(ROOT), "--require-live-claim"]) == 1
+def test_unbound_manual_workspace_cannot_run_live_gate(tmp_path, monkeypatch, capsys):
+    workspace = tmp_path / "manual-checkout"
+    workspace.mkdir()
+    tasks = management.check_repo(ROOT)
+    monkeypatch.setattr(management, "check_repo", lambda root: tasks)
+    assert management.main(["--repo", str(workspace), "--require-live-claim"]) == 1
     assert "actual native GH-N" in capsys.readouterr().err
 
 

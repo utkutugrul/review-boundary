@@ -34,11 +34,26 @@ class ClaudeReviewContract(unittest.TestCase):
 
     def git(self, *args):
         env = {"PATH": os.defpath, "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull}
-        return subprocess.check_output(
-            ["git", "-C", str(self.repo), "-c", "user.name=Fixture",
-             "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false", *args],
-            env=env, stderr=subprocess.DEVNULL,
-        ).decode().strip()
+        return (
+            subprocess.check_output(
+                [
+                    "git",
+                    "-C",
+                    str(self.repo),
+                    "-c",
+                    "user.name=Fixture",
+                    "-c",
+                    "user.email=fixture@example.invalid",
+                    "-c",
+                    "commit.gpgsign=false",
+                    *args,
+                ],
+                env=env,
+                stderr=subprocess.DEVNULL,
+            )
+            .decode()
+            .strip()
+        )
 
     def commit(self):
         self.git("add", ".")
@@ -61,10 +76,12 @@ class ClaudeReviewContract(unittest.TestCase):
             "    names = [f for f in flags if f.startswith('--')]\n"
             "    names += ['--system-prompt', '--json-schema']\n"
             "    if mode == 'unsupported': names.remove('--tools')\n"
+            "    if mode == 'missing_model': names.remove('--model')\n"
             "    if mode == 'flag_prefix': names = [f + 'BAD' for f in names]\n"
             "    print(' \\n'.join(names) + ' ')\n"
             "    sys.exit(0)\n"
             "assert args[:len(flags)] == flags\n"
+            "assert args[args.index('--model') + 1] == 'sonnet'\n"
             "assert args[len(flags)] == '--system-prompt'\n"
             "assert args[-2] == '--json-schema'\n"
             "assert not any(n in os.environ for n in [\n"
@@ -108,7 +125,7 @@ class ClaudeReviewContract(unittest.TestCase):
             "    envelope.update(is_error=True, result='never-retain-private-provider-error')\n"
             "if mode == 'cli_subtype': envelope['subtype'] = 'error_max_turns'\n"
             "if mode == 'malformed': print('never-retain-not-json'); sys.exit(0)\n"
-            "if mode == 'duplicate_json': print('{\"type\":\"result\",\"type\":\"result\"}'); sys.exit(0)\n"
+            'if mode == \'duplicate_json\': print(\'{"type":"result","type":"result"}\'); sys.exit(0)\n'
             "if mode == 'nonfinite': print('{\"cost\":NaN}'); sys.exit(0)\n"
             "if mode == 'invalid_utf8': os.write(1, b'\\xff'); sys.exit(0)\n"
             "if mode == 'stdout_flood': os.write(1, b'x' * (256 * 1024)); time.sleep(60)\n"
@@ -129,8 +146,13 @@ class ClaudeReviewContract(unittest.TestCase):
 
     def args(self, mode="ok", **changes):
         args = SimpleNamespace(
-            repo=self.repo, revision=self.head, base=None, path=["safe.py"], timeout=5,
-            claude=self.executable(mode), describe=False,
+            repo=self.repo,
+            revision=self.head,
+            base=None,
+            path=["safe.py"],
+            timeout=5,
+            claude=self.executable(mode),
+            describe=False,
         )
         for name, value in changes.items():
             setattr(args, name, value)
@@ -146,10 +168,19 @@ class ClaudeReviewContract(unittest.TestCase):
         self.assertNotIn("never-retain", json.dumps(result))
 
     def test_positive_binding_flags_environment_and_cleanup(self):
-        with patch.dict(os.environ, {name: "fixture-only" for name in (
-            "UNRELATED_SECRET", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN",
-            "SYMPHONY_GITHUB_TOKEN", "CLAUDE_CONFIG_DIR",
-        )}):
+        with patch.dict(
+            os.environ,
+            {
+                name: "fixture-only"
+                for name in (
+                    "UNRELATED_SECRET",
+                    "ANTHROPIC_API_KEY",
+                    "ANTHROPIC_AUTH_TOKEN",
+                    "SYMPHONY_GITHUB_TOKEN",
+                    "CLAUDE_CONFIG_DIR",
+                )
+            },
+        ):
             result = self.call("finding")
         self.assertEqual(result["status"], "completed", result)
         self.assertEqual(result["source"]["revision"], self.head)
@@ -159,7 +190,10 @@ class ClaudeReviewContract(unittest.TestCase):
         self.assertEqual(result["scratch_cleanup"], "removed")
         self.assertEqual(len(result["review"]["findings"]), 1)
         for process in result["processes"]:
+            self.assertEqual(process["returncode"], 0)
             self.assertTrue(process["cleanup"]["leader_reaped"])
+            self.assertEqual(process["cleanup"]["leader_returncode"], -signal.SIGKILL)
+            self.assertEqual(process["cleanup"]["ownership"], "retained_until_signals")
             self.assertEqual(process["cleanup"]["group_probe"], "absent")
             self.assertTrue(process["stdout_eof"] and process["stderr_eof"])
         self.assertFalse(list(self.repo.glob("claude-review-*")))
@@ -171,8 +205,10 @@ class ClaudeReviewContract(unittest.TestCase):
         result = self.call("assert_frozen")
         self.assertEqual(result["status"], "completed", result)
         self.assertEqual((self.repo / "safe.py").read_text(), dirty)
-        self.assertEqual(result["source"]["files"][0]["current"]["sha256"],
-                         bridge.digest(b"def value():\n    return 1\n"))
+        self.assertEqual(
+            result["source"]["files"][0]["current"]["sha256"],
+            bridge.digest(b"def value():\n    return 1\n"),
+        )
 
     def test_unrelated_commit_keeps_key_but_selected_change_invalidates_it(self):
         first = self.call(describe=True)
@@ -210,17 +246,26 @@ class ClaudeReviewContract(unittest.TestCase):
     def test_protocol_failure_controls_after_genuine_positive(self):
         self.assertEqual(self.call()["status"], "completed")
         cases = {
-            "refusal": "incomplete_review", "partial": "incomplete_review",
-            "missing_coverage": "invalid_result", "wrong_revision": "source_binding_mismatch",
-            "wrong_key": "source_binding_mismatch", "extra_field": "invalid_result",
-            "bad_line": "finding_location_mismatch", "bad_path": "invalid_result",
-            "bool_line": "invalid_result", "denial": "permission_denied",
+            "refusal": "incomplete_review",
+            "partial": "incomplete_review",
+            "missing_coverage": "invalid_result",
+            "wrong_revision": "source_binding_mismatch",
+            "wrong_key": "source_binding_mismatch",
+            "extra_field": "invalid_result",
+            "bad_line": "finding_location_mismatch",
+            "bad_path": "invalid_result",
+            "bool_line": "invalid_result",
+            "denial": "permission_denied",
             "missing_denials": "permission_evidence_missing",
             "wrong_denials": "permission_evidence_missing",
-            "no_structure": "structured_result_missing", "cli_error": "cli_unsuccessful",
-            "cli_subtype": "cli_unsuccessful", "malformed": "invalid_json",
-            "duplicate_json": "invalid_json", "nonfinite": "invalid_json",
-            "invalid_utf8": "invalid_json", "nonzero": "process_exit",
+            "no_structure": "structured_result_missing",
+            "cli_error": "cli_unsuccessful",
+            "cli_subtype": "cli_unsuccessful",
+            "malformed": "invalid_json",
+            "duplicate_json": "invalid_json",
+            "nonfinite": "invalid_json",
+            "invalid_utf8": "invalid_json",
+            "nonzero": "process_exit",
         }
         for mode, reason in cases.items():
             with self.subTest(mode=mode):
@@ -234,9 +279,12 @@ class ClaudeReviewContract(unittest.TestCase):
         self.assert_unavailable(result, "coverage_mismatch")
 
     def test_unsupported_cli_stops_before_review(self):
-        for mode, reason in (("unsupported", "unsupported_cli_flags"),
-                             ("flag_prefix", "unsupported_cli_flags"),
-                             ("version_bad", "unrecognized_cli_version")):
+        for mode, reason in (
+            ("unsupported", "unsupported_cli_flags"),
+            ("missing_model", "unsupported_cli_flags"),
+            ("flag_prefix", "unsupported_cli_flags"),
+            ("version_bad", "unrecognized_cli_version"),
+        ):
             with self.subTest(mode=mode):
                 result = self.call(mode)
                 self.assert_unavailable(result, reason)
@@ -269,7 +317,9 @@ class ClaudeReviewContract(unittest.TestCase):
                 self.assert_unavailable(result, "timeout")
                 self.assertLess(time.monotonic() - began, 2)
                 self.assertTrue(result["processes"][-1]["cleanup"]["leader_reaped"])
-                self.assertIn(result["processes"][-1]["cleanup"]["kill"], ("sent", "absent", "denied"))
+                self.assertIn(
+                    result["processes"][-1]["cleanup"]["kill"], ("sent", "absent", "denied")
+                )
 
     def test_blocked_stdin_does_not_escape_the_deadline(self):
         (self.repo / "safe.py").write_text("x" * 60000)
@@ -279,17 +329,143 @@ class ClaudeReviewContract(unittest.TestCase):
         self.assertFalse(result["processes"][-1]["stdin_complete"])
 
     def test_cleanup_denial_does_not_become_absent_when_leader_is_reaped(self):
-        process = Mock(pid=12345, returncode=0)
+        process = Mock(pid=12345, returncode=None)
+        process.wait.side_effect = lambda **kwargs: setattr(process, "returncode", 0)
         with patch.object(bridge.os, "killpg", side_effect=PermissionError):
-            facts = bridge.cleanup(process)
-        self.assertEqual(facts, {"term": "denied", "kill": "denied",
-                                 "leader_reaped": True, "group_probe": "denied"})
+            facts = bridge.cleanup(process, grace=0)
+        self.assertEqual(
+            facts,
+            {
+                "term": "denied",
+                "kill": "denied",
+                "ownership": "retained_until_signals",
+                "leader_reaped": True,
+                "leader_returncode": 0,
+                "group_probe": "denied",
+            },
+        )
+
+    def test_real_children_are_not_reaped_until_all_retiring_signals(self):
+        real_signal = bridge._group_signal
+        real_wait = bridge.subprocess.Popen.wait
+        signaled = {}
+
+        def owned_signal(pid, value):
+            if value:
+                self.assertEqual(os.getpgid(pid), pid)
+                signaled.setdefault(pid, []).append(value)
+            else:
+                self.assertEqual(signaled[pid], [signal.SIGTERM, signal.SIGKILL])
+                with self.assertRaises(ChildProcessError):
+                    os.waitpid(pid, os.WNOHANG)
+            return real_signal(pid, value)
+
+        def owned_wait(process, *args, **kwargs):
+            self.assertEqual(signaled[process.pid], [signal.SIGTERM, signal.SIGKILL])
+            return real_wait(process, *args, **kwargs)
+
+        with (
+            patch.object(
+                bridge.subprocess.Popen,
+                "poll",
+                side_effect=AssertionError("poll would release ownership before cleanup"),
+            ),
+            patch.object(bridge.subprocess.Popen, "wait", new=owned_wait),
+            patch.object(bridge, "_group_signal", side_effect=owned_signal),
+        ):
+            self.assertEqual(self.call("finding")["status"], "completed")
+            self.assert_unavailable(self.call("closed_streams", timeout=0.4), "timeout")
+        self.assertTrue(signaled)
+        self.assertTrue(
+            all(values == [signal.SIGTERM, signal.SIGKILL] for values in signaled.values())
+        )
+
+    def test_reaped_leader_is_never_signaled(self):
+        for returncode in (0, -signal.SIGKILL):
+            with self.subTest(returncode=returncode):
+                process = Mock(pid=12345, returncode=returncode)
+                with (
+                    patch.object(bridge.os, "killpg") as killpg,
+                ):
+                    facts = bridge.cleanup(process)
+                killpg.assert_not_called()
+                process.wait.assert_not_called()
+                self.assertEqual(facts["ownership"], "process_ownership_lost")
+                self.assertEqual(facts["term"], "not_attempted")
+                self.assertEqual(facts["kill"], "not_attempted")
+                self.assertEqual(facts["group_probe"], "unknown")
+                self.assertEqual(facts["leader_reaped"], returncode is not None)
+
+    def test_autoreaping_host_is_unavailable_before_launch(self):
+        records = []
+        with (
+            patch.object(bridge.signal, "getsignal", return_value=signal.SIG_IGN),
+            patch.object(bridge.subprocess, "Popen") as popen,
+            self.assertRaisesRegex(bridge.Unavailable, "process_wait_unavailable"),
+        ):
+            bridge.run_process(
+                ["unused"],
+                stage="test",
+                cwd=self.repo,
+                env={},
+                deadline=time.monotonic() + 1,
+                records=records,
+            )
+        popen.assert_not_called()
+        self.assertEqual(records[0]["failure"], "process_wait_unavailable")
+
+    def test_supervisor_missing_invalid_or_overflowed_status_is_unavailable(self):
+        for status, reason in (
+            (b"", "command_status_missing"),
+            (b"never-retain", "command_status_missing"),
+            (b"x" * 33, "command_status_invalid"),
+        ):
+            with self.subTest(status=status):
+                supervisor = (
+                    "import os, signal, sys\n"
+                    "signal.signal(signal.SIGTERM, lambda *_: None)\n"
+                    "os.close(1); os.close(2)\n"
+                    f"os.write(int(sys.argv[1]), {status!r})\n"
+                    "os.close(int(sys.argv[1]))\n"
+                    "while True: signal.pause()\n"
+                )
+                records = []
+                with (
+                    patch.object(bridge, "SUPERVISOR", supervisor),
+                    self.assertRaisesRegex(bridge.Unavailable, reason),
+                ):
+                    bridge.run_process(
+                        ["unused"],
+                        stage="test",
+                        cwd=self.repo,
+                        env={},
+                        deadline=time.monotonic() + 1,
+                        records=records,
+                    )
+                self.assertTrue(records[0]["cleanup"]["leader_reaped"])
+                self.assertEqual(records[0]["cleanup"]["group_probe"], "absent")
+                self.assertNotIn("never-retain", json.dumps(records))
+
+    def test_command_launch_failure_keeps_supervisor_cleanup_facts(self):
+        records = []
+        with self.assertRaisesRegex(bridge.Unavailable, "launch_or_io_error"):
+            bridge.run_process(
+                [str(self.root / "not-installed")],
+                stage="test",
+                cwd=self.repo,
+                env={},
+                deadline=time.monotonic() + 1,
+                records=records,
+            )
+        self.assertIsNone(records[0]["returncode"])
+        self.assertEqual(records[0]["cleanup"]["ownership"], "retained_until_signals")
+        self.assertTrue(records[0]["cleanup"]["leader_reaped"])
 
     def test_unconfirmed_group_cannot_complete_a_review(self):
         real_cleanup = bridge.cleanup
 
-        def unconfirmed(process):
-            facts = real_cleanup(process)
+        def unconfirmed(process, **kwargs):
+            facts = real_cleanup(process, **kwargs)
             facts["group_probe"] = "denied"
             return facts
 
@@ -334,8 +510,12 @@ class ClaudeReviewContract(unittest.TestCase):
         (self.repo / "binary").write_bytes(b"\0")
         (self.repo / "huge").write_bytes(b"x" * (bridge.MAX_FILE_BYTES + 1))
         self.head = self.commit()
-        for path, reason in (("link", "not_regular_source"), ("folder", "not_regular_source"),
-                             ("binary", "binary_source"), ("huge", "source_file_limit")):
+        for path, reason in (
+            ("link", "not_regular_source"),
+            ("folder", "not_regular_source"),
+            ("binary", "binary_source"),
+            ("huge", "source_file_limit"),
+        ):
             with self.subTest(path=path):
                 self.assert_unavailable(self.call(path=[path]), reason)
 
@@ -348,14 +528,28 @@ class ClaudeReviewContract(unittest.TestCase):
     def test_sigterm_returns_unavailable_after_process_cleanup(self):
         args = self.args("timeout")
         process = subprocess.Popen(
-            [sys.executable, str(ROOT / "scripts/claude_review.py"), "--repo", str(self.repo),
-             "--revision", self.head, "--path", "safe.py", "--claude", args.claude],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            [
+                sys.executable,
+                str(ROOT / "scripts/claude_review.py"),
+                "--repo",
+                str(self.repo),
+                "--revision",
+                self.head,
+                "--path",
+                "safe.py",
+                "--claude",
+                args.claude,
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
         )
         try:
             # The trusted fake announces readiness; cancellation cannot race its startup.
             deadline = time.monotonic() + 3
-            while not list(self.repo.glob("claude-review-*/review-started")) and process.poll() is None:
+            while (
+                not list(self.repo.glob("claude-review-*/review-started"))
+                and process.poll() is None
+            ):
                 self.assertLess(time.monotonic(), deadline)
                 time.sleep(0.01)
             process.send_signal(signal.SIGTERM)

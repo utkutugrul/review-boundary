@@ -17,7 +17,9 @@ An unavailable CLI/account remains unavailable.
 
 Use trusted installed `claude` on PATH, or supply its executable with `--claude`.
 The helper checks bounded `--version` and `--help` output before a model request
-and refuses missing flags. Initial compatibility evidence: installed Claude Code
+and refuses missing flags, including `--model`. The fixed public alias is
+`sonnet`; account or user configuration does not select the review model.
+Initial compatibility evidence: installed Claude Code
 2.1.319 help and the official [CLI reference](https://code.claude.com/docs/en/cli-reference)
 and [structured-output procedure](https://code.claude.com/docs/en/headless).
 That verifies declarations, not live model behavior.
@@ -57,7 +59,8 @@ Optional base contents accompany current contents. Claude starts in an empty
 temporary directory inside the writable repository, removed afterward. The
 helper does not write source files. Its fixed invocation requests:
 
-- Print mode with JSON schema and a separate trusted system prompt.
+- Print mode with explicit `--model sonnet`, JSON schema and a separate trusted
+  system prompt.
 - `--tools ""`, empty strict MCP configuration, disabled slash commands and Chrome.
 - Safe/restricted modes, empty setting sources, disabled hooks, `dontAsk`
   permissions, and no saved conversation or session continuation.
@@ -76,9 +79,19 @@ keep pipe backpressure within that deadline. Each CLI invocation admits at most
 is counted and discarded. Raw stdout, provider errors, account/session identifiers
 and billing metadata are not copied into reports.
 
-Each child owns a POSIX session/group. Cleanup attempts group TERM, waits at most
-0.2 seconds for the leader, attempts group KILL even after leader exit, then waits
-at most 0.5 seconds. Reports preserve signal outcomes, return code, leader reaping,
+Each invocation has a small stdlib Python supervisor owning its POSIX session/group.
+It launches the actual command in that group, reaps the command, sends its exit
+code through a separate bounded pipe, and stays alive. The command cannot inherit
+the status pipe. The parent never polls or waits for the supervisor before cleanup.
+Cleanup attempts group TERM, gives an unfinished command at most 0.2 seconds,
+and attempts group KILL before the final supervisor wait of at most 0.5 seconds.
+An already finished command needs no grace period. No retiring signal is
+sent after reaping. The final signal-zero probe delivers no signal; only an absent
+group confirms cleanup. A remaining or possibly reused group stays unavailable.
+Lost ownership prevents further group signals and leaves cleanup unconfirmed.
+Hosts without the default SIGCHLD disposition are unavailable before launch.
+Reports distinguish the command return code from the supervisor's final return
+code and preserve ownership, signal outcomes, leader reaping,
 pipe EOF, input completion and the final group probe. Denied signals, remaining
 groups (including zombies), and unknown retirement never become cleanup success.
 SIGINT/SIGTERM request cancellation without interrupting child-handle acquisition

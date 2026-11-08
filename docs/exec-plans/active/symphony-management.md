@@ -1,6 +1,6 @@
 # Symphony management and remaining milestones
 
-Status: GH-13 pilot implementation prepared; real Claude review blocks delivery.
+Status: GH-13 ordinary CLI helper available; real Claude review blocks delivery.
 These are the actual [repository issues](https://github.com/utkutugrul/review-boundary/issues).
 Other tasks remain disabled. The previous agents have stopped, but #10/#11/#12 retain
 manual handoff holds until their uncommitted sources are explicitly migrated.
@@ -88,8 +88,8 @@ Null links are permitted only for future pending tasks.
         "Record scoped actual checks and independent final-source review in the issue/PR."
       ],
       "evidence": [
-        "GH-13 contract checks: 19 helper tests plus 47 management tests pass on Python 3.11 and 3.14 in an isolated neutral-name clone.",
-        "Installed Claude Code 2.1.319 help/version checked; real smoke and independent review remain unavailable pending separate authorization.",
+        "GH-13 contract checks: 24 helper tests plus 47 management tests pass on Python 3.11 and 3.14 in the actual GH-13 workspace; production dispatch checks are unchanged.",
+        "Installed Claude Code 2.1.319 help/version verify required flags including --model; the fixed public alias is sonnet. Real smoke and independent review remain pending the operator's separately authorized run.",
         "See gh-13-worklog.md for scope, observed failures, checks and delivery unknowns; material-risk acceptance remains WAIT."
       ]
     },
