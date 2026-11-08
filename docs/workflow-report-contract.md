@@ -138,12 +138,13 @@ Claude review findings and cleanup facts belong in the issue/PR evidence. Missin
 or unavailable review stays unavailable. This contract does not approve delivery
 or complete downstream execution/integration milestones.
 
-GH-28 recorded local validation used pytest 9.2.0 and pydantic 2.14.3. Python
-3.11.15 passed 158 report tests (45.39s) plus 239 existing workflow tests (28.46s).
-Python 3.14.3 passed the combined 397 tests (75.41s). The existing-test scope also
-included `tests/test_workflow_boundaries.py`. Repository Ruff checks and formatting
-passed, as did the management checker (10 tasks, dispatch not checked by that
-command). The actual-response pre-edit snapshot passed separately. A byte audit
-preserved all 269 existing tracked files and the complete disjoint Native56
-roster, including 41 paths absent from this base. These are recorded harness and
-source-audit observations, not process/model attestation or reviewer acceptance.
+GH-28 recorded local validation used pytest 9.2.0 and pydantic 2.14.3. The final
+176 report tests passed on Python 3.11.15 (47.78s) and 3.14.3 (48.63s). Eighteen
+encoding regression controls failed before the UTF-8 fix. The 239 existing
+workflow case/replay/world/boundary tests passed per runtime earlier against
+identical CORE11 source bytes. Repository Ruff checks and formatting passed, as
+did the management checker (10 tasks, dispatch not checked by that command).
+Actual-response pre-edit snapshots passed separately. A byte audit preserved all
+269 existing tracked files and the complete disjoint Native56 roster, including
+41 paths absent from this base. These are recorded harness and source-audit
+observations, not process/model attestation or reviewer acceptance.

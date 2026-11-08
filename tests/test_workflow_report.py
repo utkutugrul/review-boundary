@@ -447,3 +447,24 @@ def test_finite_case_row_byte_depth_node_and_json_domain_bounds():
 def test_ambiguous_or_invalid_wire_json_is_rejected(raw):
     with pytest.raises(ValueError):
         validate_workflow_run(raw)
+
+
+@pytest.mark.parametrize(
+    "encoding", ["utf-16", "utf-16-le", "utf-16-be", "utf-32", "utf-32-le", "utf-32-be"]
+)
+@pytest.mark.parametrize("document_kind", ["report", "expected", "row"])
+def test_non_utf8_wire_documents_are_rejected_before_json_encoding_autodetection(
+    encoding, document_kind
+):
+    report = json.loads((FIXTURES / "scripted-complete.json").read_bytes())
+    document = {"report": report, "expected": report["expected"], "row": report["scored_cases"][0]}[
+        document_kind
+    ]
+    raw = json.dumps(document).encode(encoding)
+    with pytest.raises(ValueError):
+        if document_kind == "report":
+            validate_workflow_run(raw)
+        elif document_kind == "expected":
+            assemble_workflow_run(raw, [])
+        else:
+            assemble_workflow_run(report["expected"], [raw])

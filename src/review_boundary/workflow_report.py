@@ -132,7 +132,8 @@ def _bool(value):
 def _document(value, *, maximum=MAX_RUN_REPORT_BYTES):
     if type(value) is bytes:
         _require(len(value) <= maximum, "Workflow report byte limit")
-        value = parse_json_object(value)
+        # Pass decoded text so json.loads cannot auto-detect UTF-16/32 bytes.
+        value = parse_json_object(value.decode("utf-8"))
     _require(type(value) is dict, "Workflow report requires a plain object")
     # Check the plain JSON domain, depth, nodes and bytes before making a detached copy.
     return json.loads(canonical_bytes(value, maximum=maximum, nodes=_MAX_NODES, depth=16))
