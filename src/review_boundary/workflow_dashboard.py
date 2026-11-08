@@ -343,11 +343,16 @@ def _read_input(path):
         if not stat.S_ISREG(path.stat().st_mode):
             raise WorkflowDashboardError("Input must be a regular JSON file")
         descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0))
-        with os.fdopen(descriptor, "rb") as stream:
-            info = os.fstat(stream.fileno())
-            if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_RUN_REPORT_BYTES:
-                raise WorkflowDashboardError("Input must be a regular JSON file of at most 2 MiB")
-            raw = stream.read(MAX_RUN_REPORT_BYTES + 1)
+        try:
+            with os.fdopen(descriptor, "rb", closefd=False) as stream:
+                info = os.fstat(stream.fileno())
+                if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_RUN_REPORT_BYTES:
+                    raise WorkflowDashboardError(
+                        "Input must be a regular JSON file of at most 2 MiB"
+                    )
+                raw = stream.read(MAX_RUN_REPORT_BYTES + 1)
+        finally:
+            os.close(descriptor)
         if len(raw) > MAX_RUN_REPORT_BYTES:
             raise WorkflowDashboardError("Input exceeds the 2 MiB report limit")
         return raw
@@ -360,27 +365,36 @@ def write_workflow_dashboard(report_path, output, *, expected=None):
     html = render_workflow_dashboard(_read_input(Path(report_path)), expected=expected)
     output = Path(output)
     temporary = None
+    failure = cause = None
     try:
         output.parent.mkdir(parents=True, exist_ok=True)
         descriptor, name = tempfile.mkstemp(prefix=".workflow-dashboard-", dir=output.parent)
         temporary = Path(name)
-        with os.fdopen(descriptor, "wb") as stream:
-            stream.write(html.encode("utf-8"))
-            stream.flush()
-            os.fsync(stream.fileno())
+        try:
+            with os.fdopen(descriptor, "wb", closefd=False) as stream:
+                stream.write(html.encode("utf-8"))
+                stream.flush()
+                os.fsync(stream.fileno())
+        finally:
+            os.close(descriptor)
         # Linking a complete same-directory file publishes atomically and fails
         # if any destination already exists, including a symlink or hardlink.
         os.link(temporary, output)
     except FileExistsError as error:
-        raise WorkflowDashboardError("Output already exists; choose a new HTML path") from error
+        failure, cause = "Output already exists; choose a new HTML path", error
     except OSError as error:
-        raise WorkflowDashboardError("Cannot write dashboard HTML file") from error
+        failure, cause = "Cannot write dashboard HTML file", error
     finally:
         if temporary is not None:
             try:
                 temporary.unlink()
             except OSError as error:
-                raise WorkflowDashboardError("Cannot remove dashboard staging file") from error
+                if failure is not None:
+                    failure += "; staging file cleanup also failed"
+                else:
+                    failure, cause = "Dashboard published, but staging file cleanup failed", error
+    if failure is not None:
+        raise WorkflowDashboardError(failure) from cause
     return output
 
 

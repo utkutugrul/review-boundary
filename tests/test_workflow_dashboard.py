@@ -346,6 +346,61 @@ class WorkflowDashboardTests(unittest.TestCase):
             self.assertEqual(Document(output.read_text()).report(), fixture())
             self.assertEqual(list(root.glob(".workflow-dashboard-*")), [])
 
+    def test_descriptor_and_cleanup_failures_preserve_ownership_and_publication_facts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, output = root / "report.json", root / "dashboard.html"
+            source.write_bytes((FIXTURES / "scripted-incomplete.json").read_bytes())
+            original_fdopen = os.fdopen
+            descriptors = []
+
+            def failing_fdopen(fd, mode, **kwargs):
+                if mode == "wb":
+                    descriptors.append(fd)
+                    raise OSError("simulated stream failure")
+                return original_fdopen(fd, mode, **kwargs)
+
+            with (
+                patch.object(dashboard.os, "fdopen", side_effect=failing_fdopen),
+                self.assertRaisesRegex(dashboard.WorkflowDashboardError, "Cannot write"),
+            ):
+                dashboard.write_workflow_dashboard(source, output)
+            with self.assertRaises(OSError):
+                os.fstat(descriptors[0])
+            self.assertFalse(output.exists())
+            self.assertEqual(list(root.glob(".workflow-dashboard-*")), [])
+
+            original_unlink = Path.unlink
+
+            def failing_cleanup(path, *args, **kwargs):
+                if path.name.startswith(".workflow-dashboard-"):
+                    raise OSError("simulated cleanup failure")
+                return original_unlink(path, *args, **kwargs)
+
+            with (
+                patch.object(Path, "unlink", failing_cleanup),
+                patch.object(dashboard.os, "fsync", side_effect=OSError("primary failure")),
+                self.assertRaisesRegex(
+                    dashboard.WorkflowDashboardError, "Cannot write.*cleanup also failed"
+                ) as caught,
+            ):
+                dashboard.write_workflow_dashboard(source, output)
+            self.assertEqual(str(caught.exception.__cause__), "primary failure")
+            self.assertFalse(output.exists())
+            for path in root.glob(".workflow-dashboard-*"):
+                path.unlink()
+
+            with (
+                patch.object(Path, "unlink", failing_cleanup),
+                self.assertRaisesRegex(
+                    dashboard.WorkflowDashboardError, "Dashboard published, but.*cleanup failed"
+                ),
+            ):
+                dashboard.write_workflow_dashboard(source, output)
+            self.assertEqual(Document(output.read_text()).report(), fixture())
+            for path in root.glob(".workflow-dashboard-*"):
+                path.unlink()
+
 
 if __name__ == "__main__":
     unittest.main()
