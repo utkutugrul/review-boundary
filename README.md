@@ -83,6 +83,7 @@ These screenshots show scripted calibration, which checks the harness rather tha
 - [Use candidate research catalogs and bounded registered exports](docs/corpus-tooling.md).
 - [Analyze repeated runs by source group](docs/source-group-analysis.md).
 - [Run explicit commands with fixed local container controls](docs/isolated-execution.md).
+- [Explore the workflow evaluation Python API](docs/agent-workflows.md).
 
 Small, public examples provide limited evidence. Results cover only the tested tasks and observed actions; they cannot certify a reviewer as safe for production repositories.
 

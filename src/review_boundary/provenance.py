@@ -76,6 +76,9 @@ HARNESS_FILES = (
     "mcp_bridge.py",
     "corpus_upstream_pyjwt.py",
     "upstream_runner.py",
+    "workflow_cases.py",
+    "workflow_world.py",
+    "workflow_replay.py",
 )
 
 

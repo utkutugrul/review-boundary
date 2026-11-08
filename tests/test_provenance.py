@@ -208,6 +208,9 @@ def test_native_task_records_actual_selected_instructions_and_tool_schemas():
         "repository_adjudication.py",
         "repository_adjudication_agreement.py",
         "repository_adjudication_ui.py",
+        "workflow_cases.py",
+        "workflow_world.py",
+        "workflow_replay.py",
     }.issubset(value["harness"]["files"])
     assert len(value["harness"]["files"]) == len(set(provenance.HARNESS_FILES))
     assert len(value["harness"]["files"]) <= provenance.MAX_HARNESS_FILES == 128
