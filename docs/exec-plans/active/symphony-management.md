@@ -8,9 +8,9 @@ metadata-correction phase. Native runtime acceptance remains incomplete. Corpus1
 is blocked after automatic research review refusals; its existing Claude-led
 research is preserved. Only PyJWT is currently admitted.
 The workflow report contract is a separate preparatory implementation task after
-CORE11 and CLAUDE13. Its pending issue cannot dispatch. It owns only new files,
-while fresh-process execution and shared product integration retain their
-existing Native12 and PROCESS14 dependencies.
+CORE11 and CLAUDE13. Its bound issue requires explicit operator promotion. It owns
+only new files. Fresh-process execution and shared product integration retain
+their existing Native12 and PROCESS14 dependencies.
 These are the actual [repository issues](https://github.com/utkutugrul/review-boundary/issues).
 
 The owner authorizes verified project PR delivery without more permission
@@ -152,7 +152,7 @@ permitted only for future pending tasks.
     {
       "id": "workflow-report-contract",
       "title": "Define a standalone workflow run report contract from delivered core results",
-      "issue": null,
+      "issue": "https://github.com/utkutugrul/review-boundary/issues/28",
       "owner": "Codex",
       "reviewer": "Claude",
       "status": "backlog",
@@ -280,10 +280,10 @@ record alone never dispatches or authorizes runtime execution.
 Corpus16 dispatch stays off pending a relevant
 external review-state change; its scope and acceptance criteria are unchanged.
 Core11 is delivered, while14/15/17/18 retain their existing dependencies.
-REPORTS15 also requires the standalone workflow report contract. Bind that new
-task to an actual issue before promotion; issue:null is pending bootstrap, not
-dispatch authority. Its new-file-only scope allows preparation alongside Native12
-without adopting Native inputs or implementing downstream integration. Recheck
+REPORTS15 also requires the standalone workflow report contract. Task28 is bound
+to its actual issue and still requires explicit operator promotion. Its scope
+allows preparation in new files alongside Native12 without adopting Native
+inputs or implementing downstream integration. Recheck
 each task's actual role, dependency record and accepted inputs before promotion.
 No old native private operator is automatically adopted or executed. See [plan rules](../../PLANS.md) and
 [operations](../../symphony-operations.md).
