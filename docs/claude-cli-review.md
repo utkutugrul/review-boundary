@@ -35,7 +35,14 @@ rtk proxy python3 scripts/claude_review.py \
 ```
 
 Capture stdout to an operator-chosen private artifact outside the source tree.
-Run the helper from the reviewed revision. Inspect findings before publishing;
+Run the helper from the reviewed revision. When reviewing the helper itself,
+the operator must independently compare its executed bytes with
+`scripts/claude_review.py` in that committed revision before invocation, and
+check the report's `helper_sha256` against those bytes afterward. Use a trusted
+checkout or an independently extracted byte-identical frozen copy; the helper's
+self-reported hash alone does not establish provenance. Do not reject unrelated
+repositories merely because they contain a same-named path.
+Inspect findings before publishing;
 they are untrusted model text. Review does not authorize publication of gated
 approval/HOLD, merge, or material-risk acceptance.
 
@@ -57,6 +64,9 @@ deletion. Missing context must not become full coverage.
 ## Process and result contract
 
 Frozen source goes through stdin with hashes, paths and original line counts.
+Citation ranges are 1-based and count only literal LF (U+000A) separators.
+An unterminated final line counts; a final LF adds no empty line. Empty files
+have zero lines. Other Unicode separators do not split source lines.
 Optional base contents accompany current contents. Claude starts in an empty
 temporary directory inside the writable repository, removed afterward. The
 helper does not write source files. Its fixed invocation requests:

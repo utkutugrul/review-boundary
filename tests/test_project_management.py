@@ -236,6 +236,70 @@ def test_none_cannot_hide_a_real_dependency():
         management.check_issue_snapshot(value, now=NOW)
 
 
+@pytest.mark.parametrize(
+    "references",
+    [
+        "#11 and #12",
+        f"{management.ISSUE_URL}11 and {management.ISSUE_URL}12",
+        f"[Core]({management.ISSUE_URL}11) and #12",
+    ],
+)
+def test_supported_dependency_references_keep_exact_plan_binding(references):
+    value = snapshot()
+    value["issue"]["body"] = value["issue"]["body"].replace("#11 and #12", references)
+    owners, dependencies = management.issue_contract(value["issue"]["body"])
+    assert owners == {"owner": "Codex", "reviewer": "Claude"}
+    assert dependencies == {11, 12}
+    assert (
+        management.check_live_claim(
+            value, tasks=registered_tasks(), expected_issue=14, manual_claims=[], now=NOW
+        )
+        == 14
+    )
+
+
+@pytest.mark.parametrize(
+    "unsupported",
+    [
+        "other/repo#5",
+        "other/repo.#5",
+        "other/repo-#5",
+        "GH-5",
+        "gh-5",
+        f"{management.REPOSITORY}#5",
+        "repo#5",
+        "#0",
+        "#05",
+    ],
+)
+@pytest.mark.parametrize("prefix", ["#11 and #12", "None.", ""])
+def test_unsupported_dependency_references_are_never_silently_dropped(unsupported, prefix):
+    value = snapshot()
+    assert management.check_issue_snapshot(value, now=NOW) == 14
+    if prefix != "#11 and #12":
+        value["dependencies"] = []
+    value["issue"]["body"] = value["issue"]["body"].replace(
+        "#11 and #12", f"{prefix} {unsupported}".strip()
+    )
+    with pytest.raises(management.ManagementError, match="unsupported issue-reference"):
+        management.check_issue_snapshot(value, now=NOW)
+
+
+@pytest.mark.parametrize("unsupported", ["other/repo#5", "GH-5"])
+def test_live_fetch_refuses_unsupported_dependencies_before_any_dependency_request(unsupported):
+    requests = []
+    value = fetch_fixture(fake_http_records(), requests)
+    assert management.check_issue_snapshot(value, now=NOW) == 14
+    records = fake_http_records()
+    records[14]["body"] = records[14]["body"].replace("#11 and #12", f"#11 and #12, {unsupported}")
+    requests.clear()
+    with pytest.raises(management.ManagementError, match="unsupported issue-reference"):
+        fetch_fixture(records, requests)
+    assert [request[0] for request in requests] == [
+        f"https://api.github.com/repos/{management.REPOSITORY}/issues/14"
+    ]
+
+
 def test_unreviewed_hook_and_unknown_status_are_rejected():
     config = management.workflow_config((ROOT / "WORKFLOW.md").read_text())
     management.check_config(config)

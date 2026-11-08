@@ -88,8 +88,8 @@ Null links are permitted only for future pending tasks.
         "Record scoped actual checks and independent final-source review in the issue/PR."
       ],
       "evidence": [
-        "GH-13 follow-up: 25 helper controls plus 47 management tests pass on Python 3.11.15 and 3.14.10; repository Ruff lint/format and management checks pass. Production dispatch checks are unchanged.",
-        "Installed Claude Code 2.1.319 help/version previously verified required flags and public --model sonnet. The operator's frozen-source attempt was unavailable/process_exit with safe category missing_login, confirmed cleanup and unchanged source; it was not a review pass. USER propagation and deterministic real-pipe backpressure controls are corrected for the authorized operator rerun.",
+        "GH-13 final follow-up: 27 helper tests plus 79 management cases pass on Python 3.11.15 and 3.14.10. Literal-LF citation bounds and unsupported dependency-reference refusal are corrected within the explicitly extended scope; all original controls remain.",
+        "The operator reports completed independent normal-Claude review of 2623cc3e43c696cefa12cfe5b646d5c2efd66540: eleven selected paths, zero permission denials, confirmed cleanup and unchanged source. All four finding dispositions are in the worklog. Final-source real review and fresh CI remain outstanding; prior failed/unavailable attempts stay explicit.",
         "See gh-13-worklog.md for scope, observed failures, checks and delivery unknowns; material-risk acceptance remains WAIT."
       ]
     },

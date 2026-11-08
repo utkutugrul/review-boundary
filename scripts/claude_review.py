@@ -52,7 +52,9 @@ SYSTEM_PROMPT = (
     "consult other sources, or delegate. Examine correctness and security, especially "
     "subprocess lifetime, actual cleanup evidence, source binding, and fail-closed refusal "
     "behavior. Compare base contents when supplied. Report actionable findings with exact "
-    "current-source paths and line ranges. Report coverage honestly: partial or missing "
+    "current-source paths and 1-based line ranges. Only literal LF (U+000A) separates "
+    "lines; count an unterminated final line, but no extra line after a final LF. Empty "
+    "files have zero lines. Report coverage honestly: partial or missing "
     "context must stay partial or unavailable. No findings is not proof of robustness. "
     "Return only the requested structured result, echoing revision and review_key."
 )
@@ -371,7 +373,7 @@ def source_snapshot(repo, revision, base, paths, deadline, records):
                 "sha256": digest(raw),
                 "bytes": size,
                 "mode": mode,
-                "lines": len(text.splitlines()),
+                "lines": raw.count(b"\n") + int(bool(raw) and not raw.endswith(b"\n")),
                 "content": text,
             }
         require(not batch, "blob_mismatch")
@@ -456,8 +458,16 @@ def result_schema(source, review_key):
                     {
                         "priority": {"type": "string", "enum": ["P0", "P1", "P2", "P3"]},
                         "path": {"type": "string", "enum": paths},
-                        "line_start": {"type": "integer", "minimum": 1},
-                        "line_end": {"type": "integer", "minimum": 1},
+                        "line_start": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "description": "1-based current-source line; only LF (U+000A) separates lines.",
+                        },
+                        "line_end": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "description": "Inclusive LF-based end line; a final LF adds no empty line.",
+                        },
                         "title": string(160),
                         "body": string(2000),
                     }

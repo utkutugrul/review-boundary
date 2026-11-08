@@ -327,7 +327,12 @@ def issue_contract(body):
         "issue Dependencies: only this repository is supported",
     )
     dependencies = {issue_number(url) for url in urls}
-    dependencies.update(int(n) for n in re.findall(r"(?<![\w/])#([1-9]\d*)\b", text))
+    bare_reference = r"(?<![\w/.-])#([1-9]\d*)\b"
+    require(
+        not re.search(r"#\d|\bGH-\d+\b", re.sub(bare_reference, "", text), re.IGNORECASE),
+        "issue Dependencies: unsupported issue-reference form; use bare #N or canonical issue URLs",
+    )
+    dependencies.update(int(n) for n in re.findall(bare_reference, text))
     require(
         dependencies or re.match(r"^None(?:[.\s]|$)", text, re.IGNORECASE),
         "issue Dependencies: use None or explicit same-repository issue references",

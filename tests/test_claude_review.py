@@ -259,6 +259,71 @@ class ClaudeReviewContract(unittest.TestCase):
         self.assertIsNone(new["base"])
         self.assertNotEqual(existing["current"]["sha256"], existing["base"]["sha256"])
 
+    def test_literal_lf_locations_preserve_source_bytes_and_hashes(self):
+        controls = [
+            ("empty.txt", b"", 0),
+            ("unterminated.txt", b"alpha", 1),
+            ("terminated.txt", b"alpha\n", 1),
+            ("blank.txt", b"\n", 1),
+            ("blank-lines.txt", b"\n\n", 2),
+            ("two-lines.txt", b"alpha\nbeta", 2),
+            ("trailing-lf.txt", b"alpha\nbeta\n", 2),
+            ("crlf.txt", b"alpha\r\nbeta\r\n", 2),
+            ("non-lf.txt", "a\rb\vc\fd\x1ce\x1df\x1eg\x85h\u2028i\u2029j".encode(), 1),
+            ("unicode-lf.txt", "alpha\u2028beta\nlast\x85part".encode(), 2),
+        ]
+        for path, raw, _ in controls:
+            (self.repo / path).write_bytes(raw)
+        self.head = self.commit()
+        result = self.call(describe=True, base=self.head, path=[p for p, _, _ in controls])
+        self.assertEqual(result["status"], "described", result)
+        source, key = result["source"], result["review_key"]
+        envelope = {
+            "type": "result",
+            "subtype": "success",
+            "is_error": False,
+            "permission_denials": [],
+            "structured_output": {
+                "revision": self.head,
+                "review_key": key,
+                "assessment": "reviewed",
+                "coverage": [{"path": p, "status": "reviewed"} for p, _, _ in controls],
+                "findings": [],
+                "limitations": [],
+            },
+        }
+        bridge.validate_review(envelope, source, key)
+        files = {file["path"]: file for file in source["files"]}
+        for path, raw, lines in controls:
+            with self.subTest(path=path):
+                for version in ("current", "base"):
+                    snapshot = files[path][version]
+                    self.assertEqual(snapshot["bytes"], len(raw))
+                    self.assertEqual(snapshot["sha256"], bridge.digest(raw))
+                    self.assertEqual(snapshot["lines"], lines)
+                finding = {
+                    "priority": "P2",
+                    "path": path,
+                    "line_start": 1,
+                    "line_end": lines,
+                    "title": "Synthetic location",
+                    "body": "Synthetic evidence.",
+                }
+                envelope["structured_output"]["findings"] = [finding]
+                if lines:
+                    bridge.validate_review(envelope, source, key)
+                finding["line_end"] = lines + 1
+                with self.assertRaisesRegex(bridge.Unavailable, "finding_location_mismatch"):
+                    bridge.validate_review(envelope, source, key)
+
+    def test_unicode_separators_cannot_inflate_cli_finding_locations(self):
+        (self.repo / "safe.py").write_text("first\u2028second\nlast\x85part", encoding="utf-8")
+        self.head = self.commit()
+        self.assertEqual(self.call("finding")["status"], "completed")
+        (self.repo / "safe.py").write_text("first\u2028second\x85last", encoding="utf-8")
+        self.head = self.commit()
+        self.assert_unavailable(self.call("finding"), "finding_location_mismatch")
+
     def test_selected_file_mode_change_invalidates_key(self):
         first = self.call(describe=True)
         (self.repo / "safe.py").chmod(0o755)
