@@ -677,6 +677,113 @@ class StoreTests(unittest.TestCase):
             self.assertEqual(result.state, JobState.UNKNOWN)
             self.assertEqual(result.error, ErrorCategory.STORAGE_UNKNOWN)
 
+    def test_ambiguous_non_intake_operations_do_not_create_missing_identities(self):
+        for operation in ("get", "claim", "renew", "finish"):
+            with self.subTest(operation=operation):
+                path = self.path.parent / f"missing-{operation}.sqlite"
+                with JobStore(path) as store:
+                    lease = Lease(self.request, "worker", 1, 200)
+                    with patch.object(store, "_commit", side_effect=sqlite3.OperationalError):
+                        if operation == "get":
+                            self.error("outcome_unknown", store.get, self.request, now_ms=100)
+                        elif operation == "claim":
+                            self.error(
+                                "outcome_unknown",
+                                store.claim,
+                                self.request,
+                                "worker",
+                                now_ms=100,
+                                lease_ms=100,
+                            )
+                        elif operation == "renew":
+                            self.error(
+                                "outcome_unknown", store.renew, lease, now_ms=100, lease_ms=100
+                            )
+                        else:
+                            self.error(
+                                "outcome_unknown",
+                                store.finish,
+                                lease,
+                                JobState.COMPLETE,
+                                now_ms=100,
+                            )
+                with JobStore(path) as reopened:
+                    self.assertEqual(reopened.list_jobs(now_ms=101), ())
+                    self.assertEqual(
+                        reopened.enqueue(self.request, now_ms=101).state, JobState.PENDING
+                    )
+
+    def test_ambiguous_read_replay_or_refused_finish_preserves_known_terminal_records(self):
+        for state in (JobState.COMPLETE, JobState.FAILED):
+            for compact in (False, True):
+                for operation in ("get", "enqueue", "finish", "renew", "list", "prune"):
+                    with self.subTest(state=state, tombstone=compact, operation=operation):
+                        path = (
+                            self.path.parent / f"known-{state.value}-{compact}-{operation}.sqlite"
+                        )
+                        with JobStore(path) as store:
+                            store.enqueue(self.request, now_ms=100)
+                            lease = store.claim(self.request, "worker", now_ms=100, lease_ms=100)
+                            store.finish(lease, state, now_ms=101)
+                            if compact:
+                                store.prune(now_ms=102, before_ms=102)
+                            original = store.get(self.request, now_ms=102)
+                            with patch.object(
+                                store, "_commit", side_effect=sqlite3.OperationalError
+                            ):
+                                if operation in ("get", "enqueue"):
+                                    self.error(
+                                        "outcome_unknown",
+                                        getattr(store, operation),
+                                        self.request,
+                                        now_ms=103,
+                                    )
+                                elif operation == "finish":
+                                    self.error(
+                                        "outcome_unknown",
+                                        store.finish,
+                                        lease,
+                                        JobState.COMPLETE,
+                                        now_ms=103,
+                                    )
+                                elif operation == "renew":
+                                    self.error(
+                                        "outcome_unknown",
+                                        store.renew,
+                                        lease,
+                                        now_ms=103,
+                                        lease_ms=100,
+                                    )
+                                elif operation == "list":
+                                    self.error("outcome_unknown", store.list_jobs, now_ms=103)
+                                else:
+                                    self.error(
+                                        "outcome_unknown", store.prune, now_ms=103, before_ms=103
+                                    )
+                        with JobStore(path) as reopened:
+                            self.assertEqual(reopened.enqueue(self.request, now_ms=104), original)
+
+    def test_capacity_refusal_during_recovery_does_not_rollback_unknown_leases(self):
+        lease = self.leased()
+        with sqlite3.connect(self.path) as raw:
+            raw.executemany(
+                "INSERT INTO jobs (repository, pull_number, head_sha, request_digest, "
+                "idempotency_key, state, created_at_ms, updated_at_ms, generation) "
+                "VALUES ('example/repository', 42, ?, ?, ?, 'pending', 100, 100, 0)",
+                (("a" * 40, "b" * 64, f"fill-{n:05d}") for n in range(9999)),
+            )
+        with patch.object(self.store, "_commit", side_effect=sqlite3.OperationalError):
+            self.error("outcome_unknown", self.store.enqueue, identity("overflow"), now_ms=101)
+        self.store.close()
+        with JobStore(self.path) as reopened:
+            self.error("time", reopened.get, lease.identity, now_ms=100)
+            result = reopened.get(lease.identity, now_ms=102)
+            self.assertEqual(result.state, JobState.UNKNOWN)
+            self.assertEqual(result.error, ErrorCategory.STORAGE_UNKNOWN)
+            self.error("not_found", reopened.get, identity("overflow"), now_ms=102)
+        with sqlite3.connect(self.path) as raw:
+            self.assertEqual(raw.execute("SELECT count(*) FROM jobs").fetchone()[0], 10000)
+
     def test_recovery_write_failure_remains_unknown_and_connection_quarantined(self):
         lease = self.leased()
 

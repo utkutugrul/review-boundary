@@ -89,11 +89,14 @@ completed external action. The integration must enforce this outside the store.
 
 A SQLite lock refusal before transaction acquisition is `busy`, with no intake.
 SQLite/I/O failure after acquisition returns `outcome_unknown` and quarantines
-that connection. Recovery attempts a separate transaction: reserve or mark the
-affected exact identity `unknown`/`storage_unknown`, and mark outstanding leases
-unknown because expiry bookkeeping may also have been rolled back. A simulated
-error after a successful commit is handled the same way as one before commit.
-Interruption attempts the same recovery, then propagates the interruption.
+that connection. Recovery attempts a separate transaction: mark outstanding
+leases and the affected pending record `unknown`/`storage_unknown`, since expiry
+bookkeeping may also have been rolled back. Only intake may reserve a missing
+identity; a savepoint isolates reservation/capacity refusal from lease downgrades
+and the clock update. Reads, replays and refused writes preserve already-known
+terminal outcomes and tombstones. An ambiguous actual finish instead downgrades
+its newly written terminal state to unknown. Errors before and after commit take
+the same recovery path. Interruption attempts recovery, then propagates.
 
 If storage also refuses recovery, the unknown marker may not persist. The prior
 row could still be pending, leased or complete. Close the quarantined connection
@@ -151,9 +154,14 @@ These are local database observations, not power-loss durability, worker
 retirement, process-cleanup proof, model robustness or full service readiness.
 Independent Source review and exact-head CI remain separate delivery evidence.
 
-Pre-review local observations: 34 store methods and 165 existing management
-cases passed on each Python 3.11.15/3.14.3 (199 each). Disabled plugin autoload
+Pre-review local observations: 37 store methods and 165 existing management
+cases passed on each Python 3.11.15/3.14.3 (202 each). Disabled plugin autoload
 leaves the existing `asyncio_mode` configuration warning. Scoped Ruff lint,
 formatting, whitespace and management contracts passed. A local Hatchling wheel
 contains byte-identical module source; wheel-imported SQLite close/reopen and
 the unchanged distribution-parity checker passed. No dependency was installed.
+
+An initial genuine Claude Source review found recovery reservation and retained
+outcome defects. Three new regression methods failed on that Source and passed
+after operation-specific recovery and savepoint isolation. Earlier evidence is
+retained separately; the corrected Source requires its own final review.

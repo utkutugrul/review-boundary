@@ -281,7 +281,14 @@ class JobStore:
     def _commit(self) -> None:
         self._db.commit()
 
-    def _recover_unknown(self, identity: JobIdentity | None, now_ms: int) -> None:
+    def _recover_unknown(
+        self,
+        identity: JobIdentity | None,
+        now_ms: int,
+        *,
+        reserve_identity: bool,
+        terminal_write: bool,
+    ) -> None:
         # Best effort only. An unavailable disk cannot promise a durable marker.
         # Keep this connection quarantined even if the recovery transaction succeeds.
         self._quarantined = True
@@ -290,27 +297,39 @@ class JobStore:
             self._db.execute("BEGIN IMMEDIATE")
             last = self._db.execute("SELECT last_now_ms FROM store_meta").fetchone()[0]
             now_ms = max(last, now_ms)
-            if identity is not None:
-                row = self._db.execute(
-                    "SELECT * FROM jobs WHERE idempotency_key = ?",
-                    (identity.idempotency_key,),
-                ).fetchone()
-                if row is None:
-                    self._insert(identity, now_ms, JobState.UNKNOWN, ErrorCategory.STORAGE_UNKNOWN)
-                elif self._record(row).identity == identity:
-                    self._db.execute(
-                        """UPDATE jobs SET state = 'unknown', error = 'storage_unknown',
-                        updated_at_ms = ?, finished_at_ms = NULL, tombstone = 0
-                        WHERE idempotency_key = ?""",
-                        (now_ms, identity.idempotency_key),
-                    )
-            # A failed global observation may have rolled back expiry bookkeeping.
+            # Preserve global fencing even if an intake reservation cannot fit.
             self._db.execute(
                 """UPDATE jobs SET state = 'unknown', error = 'storage_unknown',
                 updated_at_ms = ?, finished_at_ms = NULL WHERE state = 'leased'""",
                 (now_ms,),
             )
             self._db.execute("UPDATE store_meta SET last_now_ms = ?", (now_ms,))
+            if identity is not None:
+                row = self._db.execute(
+                    "SELECT * FROM jobs WHERE idempotency_key = ?",
+                    (identity.idempotency_key,),
+                ).fetchone()
+                record = self._record(row) if row is not None else None
+                if record is None and reserve_identity:
+                    self._db.execute("SAVEPOINT intake_reservation")
+                    try:
+                        self._insert(
+                            identity, now_ms, JobState.UNKNOWN, ErrorCategory.STORAGE_UNKNOWN
+                        )
+                    except sqlite3.IntegrityError:
+                        self._db.execute("ROLLBACK TO intake_reservation")
+                    self._db.execute("RELEASE intake_reservation")
+                elif (
+                    record is not None
+                    and record.identity == identity
+                    and (record.state is JobState.PENDING or terminal_write)
+                ):
+                    self._db.execute(
+                        """UPDATE jobs SET state = 'unknown', error = 'storage_unknown',
+                        updated_at_ms = ?, finished_at_ms = NULL, tombstone = 0
+                        WHERE idempotency_key = ?""",
+                        (now_ms, identity.idempotency_key),
+                    )
             self._db.commit()
         except (sqlite3.Error, StoreError):
             try:
@@ -323,6 +342,9 @@ class JobStore:
         now_ms: int,
         action: Callable[[], _T],
         identity: JobIdentity | None = None,
+        *,
+        reserve_identity: bool = False,
+        finishing: bool = False,
     ) -> _T:
         self._available()
         _integer(now_ms, 0, MAX_TIME_MS, "time")
@@ -330,6 +352,7 @@ class JobStore:
             self._db.execute("BEGIN IMMEDIATE")
         except sqlite3.Error as error:
             raise StoreError(self._sqlite_code(error)) from None
+        terminal_write = False
         try:
             last = self._db.execute("SELECT last_now_ms FROM store_meta").fetchone()[0]
             if now_ms < last:
@@ -345,6 +368,7 @@ class JobStore:
             refusal = None
             try:
                 result = action()
+                terminal_write = finishing
             except StoreError as error:
                 # Persist expiry/time observation even when the requested write is refused.
                 refusal = error
@@ -352,10 +376,14 @@ class JobStore:
         except StoreError:
             raise
         except (sqlite3.Error, OSError):
-            self._recover_unknown(identity, now_ms)
+            self._recover_unknown(
+                identity, now_ms, reserve_identity=reserve_identity, terminal_write=terminal_write
+            )
             raise StoreError("outcome_unknown") from None
         except BaseException:
-            self._recover_unknown(identity, now_ms)
+            self._recover_unknown(
+                identity, now_ms, reserve_identity=reserve_identity, terminal_write=terminal_write
+            )
             raise
         if refusal is not None:
             raise refusal
@@ -421,7 +449,7 @@ class JobStore:
             self._insert(identity, now_ms)
             return self._find(identity)
 
-        return self._transaction(now_ms, action, identity)
+        return self._transaction(now_ms, action, identity, reserve_identity=True)
 
     def get(self, identity: JobIdentity, *, now_ms: int) -> JobRecord:
         _identity(identity)
@@ -523,7 +551,7 @@ class JobStore:
             )
             return self._find(lease.identity)
 
-        return self._transaction(now_ms, action, lease.identity)
+        return self._transaction(now_ms, action, lease.identity, finishing=True)
 
     def list_jobs(
         self,
