@@ -1,0 +1,515 @@
+"""Meaningful positive and single-field negative management contract checks."""
+
+import importlib.util
+import io
+import json
+from copy import deepcopy
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[1]
+SPEC = importlib.util.spec_from_file_location(
+    "project_management", ROOT / "scripts/check_project_management.py"
+)
+management = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(management)
+NOW = datetime(2026, 11, 7, 20, tzinfo=UTC)
+
+
+def registered_tasks():
+    return management.plan_tasks((ROOT / management.PLAN).read_text())
+
+
+def snapshot():
+    return {
+        "repository": management.REPOSITORY,
+        "observed_at": NOW.isoformat(),
+        "issue": {
+            "number": 14,
+            "html_url": management.ISSUE_URL + "14",
+            "state": "open",
+            "title": "Implement fresh workflow sessions",
+            "assignee": {"login": "utkutugrul"},
+            "labels": [
+                {"name": name}
+                for name in (
+                    "symphony",
+                    "dispatch:enabled",
+                    "status:ready",
+                    "owner:codex",
+                    "review:claude",
+                )
+            ],
+            "body": (
+                "## Goal\nImplement a scoped change.\n## Ownership\n"
+                "Implementation lead: Codex\nIndependent reviewer: Claude\n## Dependencies\n#11 and #12\n"
+                "## Acceptance criteria\n- [ ] Preserve two fresh sessions.\n"
+                "## Validation\nRun the scoped checks.\n## Delivery\nA reviewable PR.\n"
+            ),
+        },
+        "dependencies": [
+            {"number": n, "html_url": management.ISSUE_URL + str(n), "state": "closed"}
+            for n in (11, 12)
+        ],
+    }
+
+
+def test_real_repository_management_contract_is_consistent():
+    assert management.check_repo(ROOT)
+
+
+def test_actual_json_frontmatter_shape_is_a_map_and_preserves_prompt():
+    config = management.workflow_config((ROOT / "WORKFLOW.md").read_text())
+    management.check_config(config)
+    assert config["tracker"]["kind"] == "github"
+
+
+@pytest.mark.parametrize(
+    "field,change,message",
+    [
+        ("labels", lambda v: v["tracker"].update(required_labels=["symphony"]), "dispatch:enabled"),
+        ("token", lambda v: v["tracker"]["provider"].update(token="literal-token"), "GITHUB_TOKEN"),
+        ("concurrency", lambda v: v["agent"].update(max_concurrent_agents=True), "concurrency"),
+        ("sandbox", lambda v: v["codex"].update(thread_sandbox="danger-full-access"), "sandbox"),
+        ("agent", lambda v: v["codex"].update(command="claude app-server"), "Codex app-server"),
+    ],
+)
+def test_one_workflow_change_is_rejected_after_positive_control(field, change, message):
+    config = management.workflow_config((ROOT / "WORKFLOW.md").read_text())
+    management.check_config(config)
+    change(config)
+    with pytest.raises(management.ManagementError, match=message):
+        management.check_config(config)
+
+
+@pytest.mark.parametrize(
+    "text,message",
+    [
+        ('---\n{"tracker":1,"tracker":2}\n---\nTask', "duplicate"),
+        ("---\n{}\nTask", "closing"),
+        ("---\n{}\n---\n", "empty"),
+    ],
+)
+def test_malformed_frontmatter_is_not_silently_accepted(text, message):
+    with pytest.raises(management.ManagementError, match=message):
+        management.workflow_config(text)
+
+
+def test_plan_acceptance_dependency_and_role_controls_are_genuine():
+    tasks = management.plan_tasks((ROOT / management.PLAN).read_text())
+    management.check_tasks(tasks)
+    for field, value, message in [
+        ("acceptance", [], "acceptance"),
+        ("reviewer", tasks[0]["owner"], "distinct"),
+        ("dependencies", ["missing-task"], "missing"),
+    ]:
+        changed = deepcopy(tasks)
+        changed[0][field] = value
+        with pytest.raises(management.ManagementError, match=message):
+            management.check_tasks(changed)
+
+
+def test_plan_cycle_is_rejected():
+    tasks = management.plan_tasks((ROOT / management.PLAN).read_text())
+    management.check_tasks(tasks)
+    tasks[0]["dependencies"] = [tasks[1]["id"]]
+    tasks[1]["dependencies"] = [tasks[0]["id"]]
+    with pytest.raises(management.ManagementError, match="cycle"):
+        management.check_tasks(tasks)
+
+
+def test_local_link_positive_then_missing_target(tmp_path, monkeypatch):
+    monkeypatch.setattr(management, "DOCUMENTS", ("map.md",))
+    (tmp_path / "target.md").write_text("# Target\n")
+    (tmp_path / "map.md").write_text("[Target](target.md)\n")
+    management.check_links(tmp_path)
+    (tmp_path / "target.md").unlink()
+    with pytest.raises(management.ManagementError, match="broken local link"):
+        management.check_links(tmp_path)
+
+
+def test_local_links_cannot_escape_repository(tmp_path, monkeypatch):
+    monkeypatch.setattr(management, "DOCUMENTS", ("map.md",))
+    (tmp_path / "map.md").write_text("[Outside](../outside.md)\n")
+    with pytest.raises(management.ManagementError, match="escapes"):
+        management.check_links(tmp_path)
+
+
+def test_supplied_ready_issue_requires_all_actual_dependency_records():
+    value = snapshot()
+    assert management.check_issue_snapshot(value, now=NOW) == 14
+    value["dependencies"].pop()
+    with pytest.raises(management.ManagementError, match="every actual dependency"):
+        management.check_issue_snapshot(value, now=NOW)
+
+
+@pytest.mark.parametrize(
+    "change,message",
+    [
+        (lambda v: v["dependencies"][0].update(state="open"), "still open/unknown"),
+        (lambda v: v["issue"]["labels"].append("status:blocked"), "exactly one"),
+        (lambda v: v["issue"].update(labels=["symphony", "status:ready"]), "dispatch labels"),
+        (lambda v: v["issue"].update(assignee={"login": "invented-bot"}), "human assignee"),
+        (
+            lambda v: v["issue"].update(
+                body=v["issue"]["body"].replace("## Acceptance criteria", "## Missing criteria")
+            ),
+            "Acceptance criteria",
+        ),
+        (
+            lambda v: v.update(observed_at=(NOW - timedelta(seconds=301)).isoformat()),
+            "stale/future",
+        ),
+        (lambda v: v.update(observed_at=(NOW + timedelta(seconds=6)).isoformat()), "stale/future"),
+        (
+            lambda v: v["dependencies"][0].update(
+                html_url="https://github.com/other/repo/issues/11"
+            ),
+            "same-repository",
+        ),
+        (lambda v: v["issue"].update(pull_request={}), "open issue"),
+    ],
+)
+def test_single_snapshot_change_fails_after_genuine_positive(change, message):
+    value = snapshot()
+    management.check_issue_snapshot(value, now=NOW)
+    change(value)
+    with pytest.raises(management.ManagementError, match=message):
+        management.check_issue_snapshot(value, now=NOW)
+
+
+def test_blocked_with_dispatch_is_refused_even_with_closed_dependencies():
+    value = snapshot()
+    management.check_issue_snapshot(value, now=NOW)
+    value["issue"]["labels"] = [
+        item for item in value["issue"]["labels"] if item["name"] != "status:ready"
+    ] + [{"name": "status:blocked"}]
+    with pytest.raises(management.ManagementError, match="must lose dispatch"):
+        management.check_issue_snapshot(value, now=NOW)
+
+
+def test_unknown_cost_or_model_claim_is_not_added_by_checker(capsys):
+    assert management.main(["--repo", str(ROOT)]) == 0
+    output = capsys.readouterr().out
+    assert "dispatch NOT checked" in output
+    assert "model" not in output.lower()
+
+
+def test_snapshot_bound_is_checked_before_json_decode(tmp_path):
+    path = tmp_path / "oversize.json"
+    path.write_bytes(b" " * (management.MAX_INPUT + 1))
+    with pytest.raises(management.ManagementError, match="256 KiB"):
+        management.read_text(path)
+
+
+def test_duplicate_dependency_and_empty_acceptance_have_specific_refusals():
+    value = snapshot()
+    management.check_issue_snapshot(value, now=NOW)
+    value["dependencies"].append(deepcopy(value["dependencies"][0]))
+    with pytest.raises(management.ManagementError, match="duplicate dependency"):
+        management.check_issue_snapshot(value, now=NOW)
+    value = snapshot()
+    value["issue"]["body"] = value["issue"]["body"].replace(
+        "- [ ] Preserve two fresh sessions.", "No concrete criterion."
+    )
+    with pytest.raises(management.ManagementError, match="concrete checklist"):
+        management.check_issue_snapshot(value, now=NOW)
+
+
+def test_none_dependencies_with_actual_explanatory_sentence_are_supported():
+    value = snapshot()
+    management.check_issue_snapshot(value, now=NOW)
+    value["issue"]["body"] = value["issue"]["body"].replace(
+        "#11 and #12", "None. Existing work may continue in its current isolated workspace."
+    )
+    value["dependencies"] = []
+    assert management.check_issue_snapshot(value, now=NOW) == 14
+
+
+def test_none_cannot_hide_a_real_dependency():
+    value = snapshot()
+    value["issue"]["body"] = value["issue"]["body"].replace("#11 and #12", "None. See #11.")
+    with pytest.raises(management.ManagementError, match="conflicts"):
+        management.check_issue_snapshot(value, now=NOW)
+
+
+def test_unreviewed_hook_and_unknown_status_are_rejected():
+    config = management.workflow_config((ROOT / "WORKFLOW.md").read_text())
+    management.check_config(config)
+    config["hooks"]["after_run"] = "unexpected command"
+    with pytest.raises(management.ManagementError, match="unreviewed executable hooks"):
+        management.check_config(config)
+    value = snapshot()
+    management.check_issue_snapshot(value, now=NOW)
+    value["issue"]["labels"].append("status:unrecognized")
+    with pytest.raises(management.ManagementError, match="unsupported status"):
+        management.check_issue_snapshot(value, now=NOW)
+
+
+def test_live_claim_has_positive_control_and_refuses_manual_owner():
+    value = snapshot()
+    assert (
+        management.check_live_claim(
+            value, tasks=registered_tasks(), expected_issue=14, manual_claims=[10, 11, 12], now=NOW
+        )
+        == 14
+    )
+    with pytest.raises(management.ManagementError, match="manual owner still active"):
+        management.check_live_claim(
+            value, tasks=registered_tasks(), expected_issue=14, manual_claims=[14], now=NOW
+        )
+
+
+def test_live_claim_cannot_authorize_a_different_issue_workspace():
+    value = snapshot()
+    management.check_live_claim(
+        value, tasks=registered_tasks(), expected_issue=14, manual_claims=[], now=NOW
+    )
+    with pytest.raises(management.ManagementError, match="workspace issue mismatch"):
+        management.check_live_claim(
+            value, tasks=registered_tasks(), expected_issue=15, manual_claims=[], now=NOW
+        )
+
+
+def test_before_run_cannot_drop_live_claim_gate():
+    config = management.workflow_config((ROOT / "WORKFLOW.md").read_text())
+    management.check_config(config)
+    config["hooks"]["before_run"] = "rtk proxy python3 scripts/check_project_management.py --repo ."
+    with pytest.raises(management.ManagementError, match="live-claim"):
+        management.check_config(config)
+
+
+def test_unbound_manual_workspace_cannot_run_live_gate(capsys):
+    assert management.main(["--repo", str(ROOT), "--require-live-claim"]) == 1
+    assert "actual native GH-N" in capsys.readouterr().err
+
+
+def fake_http_records():
+    value = snapshot()
+    records = {14: value["issue"]}
+    records.update({item["number"]: item for item in value["dependencies"]})
+    return records
+
+
+def fetch_fixture(records, requests=None, clock=lambda: 0):
+    def open_url(request, timeout):
+        if requests is not None:
+            requests.append(
+                (request.full_url, request.method, request.get_header("Authorization"), timeout)
+            )
+        return io.BytesIO(json.dumps(records[int(request.full_url.rsplit("/", 1)[1])]).encode())
+
+    return management.fetch_live_snapshot(
+        14, token="fixture-token", open_url=open_url, clock=clock, now=NOW
+    )
+
+
+def test_live_gate_uses_fixed_get_ids_and_explicit_credential_without_network():
+    requests = []
+    value = fetch_fixture(fake_http_records(), requests)
+    assert (
+        management.check_live_claim(
+            value, tasks=registered_tasks(), expected_issue=14, manual_claims=[], now=NOW
+        )
+        == 14
+    )
+    assert [item[0] for item in requests] == [
+        f"https://api.github.com/repos/{management.REPOSITORY}/issues/{n}" for n in (14, 11, 12)
+    ]
+    assert all(
+        method == "GET" and key == "Bearer fixture-token" and timeout == 5
+        for _, method, key, timeout in requests
+    )
+
+
+@pytest.mark.parametrize(
+    "problem,message",
+    [("wrong_issue", "identity mismatch"), ("open_dependency", "still open/unknown")],
+)
+def test_live_single_response_fault_after_genuine_positive(problem, message):
+    records = fake_http_records()
+    value = fetch_fixture(records)
+    management.check_live_claim(
+        value, tasks=registered_tasks(), expected_issue=14, manual_claims=[], now=NOW
+    )
+    if problem == "wrong_issue":
+        records[14]["number"] = 999
+        with pytest.raises(management.ManagementError, match=message):
+            fetch_fixture(records)
+    else:
+        records[11]["state"] = "open"
+        value = fetch_fixture(records)
+        with pytest.raises(management.ManagementError, match=message):
+            management.check_live_claim(
+                value, tasks=registered_tasks(), expected_issue=14, manual_claims=[], now=NOW
+            )
+
+
+def test_live_body_and_deadline_bounds_after_positive_control():
+    fetch_fixture(fake_http_records())
+    with pytest.raises(management.ManagementError, match="64 KiB"):
+        management.fetch_live_snapshot(
+            14,
+            token="fixture-token",
+            open_url=lambda request, timeout: io.BytesIO(b"x" * 65537),
+            clock=lambda: 0,
+            now=NOW,
+        )
+    ticks = iter((0, 0, 11))
+    with pytest.raises(management.ManagementError, match="deadline"):
+        fetch_fixture(fake_http_records(), clock=lambda: next(ticks))
+
+
+def test_live_missing_token_redirect_and_transport_failure_are_value_free():
+    fetch_fixture(fake_http_records())
+    with pytest.raises(management.ManagementError, match="explicit SYMPHONY_GITHUB_TOKEN"):
+        management.fetch_live_snapshot(14, token="")
+    with pytest.raises(management.ManagementError, match="redirects"):
+        management._NoRedirect().redirect_request(
+            None, None, 302, "", {}, "https://elsewhere.invalid"
+        )
+
+    def failed(request, timeout):
+        raise management.URLError("fixture-token must never be printed")
+
+    with pytest.raises(management.ManagementError) as error:
+        management.fetch_live_snapshot(
+            14, token="fixture-token", open_url=failed, clock=lambda: 0, now=NOW
+        )
+    assert "fixture-token" not in str(error.value)
+    assert "bounded request failed" in str(error.value)
+
+
+def test_cli_positive_claim_binds_workspace_before_single_identity_fault(
+    tmp_path, monkeypatch, capsys
+):
+    workspace = tmp_path / "GH-14"
+    (workspace / management.PLAN).parent.mkdir(parents=True)
+    (workspace / management.PLAN).write_text((ROOT / management.PLAN).read_text())
+    value = snapshot()
+    value["observed_at"] = datetime.now(UTC).isoformat()
+    path = tmp_path / "actual-format-fixture.json"
+    path.write_text(json.dumps(value))
+    tasks = management.plan_tasks((ROOT / management.PLAN).read_text())
+    monkeypatch.setattr(management, "check_repo", lambda root: tasks)
+    assert management.main(["--repo", str(workspace), "--issue-snapshot", str(path)]) == 0
+    assert "GH-14" in capsys.readouterr().out
+    value["issue"]["number"] = 15
+    value["issue"]["html_url"] = management.ISSUE_URL + "15"
+    path.write_text(json.dumps(value))
+    assert management.main(["--repo", str(workspace), "--issue-snapshot", str(path)]) == 1
+    assert "workspace issue mismatch" in capsys.readouterr().err
+
+
+def test_manual_claim_denial_happens_before_auth_or_network(tmp_path, monkeypatch, capsys):
+    workspace = tmp_path / "GH-10"
+    (workspace / management.PLAN).parent.mkdir(parents=True)
+    (workspace / management.PLAN).write_text((ROOT / management.PLAN).read_text())
+    tasks = management.plan_tasks((ROOT / management.PLAN).read_text())
+    monkeypatch.setattr(management, "check_repo", lambda root: tasks)
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("manual issue must not reach credential/network boundary")
+
+    monkeypatch.setattr(management, "os", SimpleNamespace(environ=SimpleNamespace(get=forbidden)))
+    monkeypatch.setattr(management, "fetch_live_snapshot", forbidden)
+    assert management.main(["--repo", str(workspace), "--require-live-claim"]) == 1
+    assert "manual owner still active" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("change", ["removed_dependency", "added_dependency", "switched_roles"])
+def test_live_claim_cannot_change_the_versioned_task_contract(change):
+    value = snapshot()
+    tasks = registered_tasks()
+    assert (
+        management.check_live_claim(
+            value, tasks=tasks, expected_issue=14, manual_claims=[], now=NOW
+        )
+        == 14
+    )
+    if change == "removed_dependency":
+        value["issue"]["body"] = value["issue"]["body"].replace("#11 and #12", "None.")
+        value["dependencies"] = []
+    elif change == "added_dependency":
+        value["issue"]["body"] = value["issue"]["body"].replace("#11 and #12", "#11, #12 and #15")
+        value["dependencies"].append(
+            {"number": 15, "html_url": management.ISSUE_URL + "15", "state": "closed"}
+        )
+    else:
+        value["issue"]["body"] = value["issue"]["body"].replace(
+            "Implementation lead: Codex\nIndependent reviewer: Claude",
+            "Implementation lead: Claude\nIndependent reviewer: Codex",
+        )
+        value["issue"]["labels"] = [
+            {"name": name}
+            for name in (
+                "symphony",
+                "dispatch:enabled",
+                "status:ready",
+                "owner:claude",
+                "review:codex",
+            )
+        ]
+    # Each changed record is internally consistent. Only its conflict with the
+    # repository plan should refuse the otherwise dispatchable claim.
+    assert management.check_issue_snapshot(value, now=NOW) == 14
+    with pytest.raises(management.ManagementError, match="versioned plan"):
+        management.check_live_claim(
+            value, tasks=tasks, expected_issue=14, manual_claims=[], now=NOW
+        )
+
+
+def test_live_aggregate_bound_has_genuine_below_cap_control():
+    records = fake_http_records()
+    records[14]["body"] = records[14]["body"].replace("#11 and #12", "#11, #12, #15 and #16")
+    for number in (15, 16):
+        records[number] = {
+            "number": number,
+            "html_url": management.ISSUE_URL + str(number),
+            "state": "closed",
+        }
+    for number in (14, 11, 12, 15):
+        records[number]["padding"] = "x" * 58000
+    value = fetch_fixture(records)
+    assert management.check_issue_snapshot(value, now=NOW) == 14
+    records[16]["padding"] = "x" * 58000
+    with pytest.raises(management.ManagementError, match="256 KiB aggregate"):
+        fetch_fixture(records)
+
+
+def test_real_transport_branch_owns_and_restores_absolute_deadline_without_network(monkeypatch):
+    records = fake_http_records()
+    changes = []
+    previous = object()
+    state = {"handler": previous}
+    fake_signal = SimpleNamespace(SIGALRM=1, ITIMER_REAL=2)
+    fake_signal.getitimer = lambda kind: (0.0, 0.0)
+
+    def handler(kind, value):
+        old = state["handler"]
+        state["handler"] = value
+        changes.append(("handler", kind, value))
+        return old
+
+    fake_signal.signal = handler
+    fake_signal.setitimer = lambda kind, seconds: changes.append(("timer", kind, seconds))
+
+    def open_url(request, timeout):
+        return io.BytesIO(json.dumps(records[int(request.full_url.rsplit("/", 1)[1])]).encode())
+
+    monkeypatch.setattr(management, "signal", fake_signal)
+    monkeypatch.setattr(
+        management, "build_opener", lambda *handlers: SimpleNamespace(open=open_url)
+    )
+    value = management.fetch_live_snapshot(14, token="fixture-token", clock=lambda: 0, now=NOW)
+    assert (
+        management.check_live_claim(
+            value, tasks=registered_tasks(), expected_issue=14, manual_claims=[], now=NOW
+        )
+        == 14
+    )
+    assert ("timer", 2, 10) in changes and ("timer", 2, 0) in changes
+    assert state["handler"] is previous
