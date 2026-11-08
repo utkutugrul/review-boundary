@@ -149,11 +149,11 @@ Ruff checks. Completion is not approval, final-source coverage or model robustne
   flags and public model alias sonnet. Static flags and fake executables do
   not replace the independently reported real review.
 
-## Frozen handoff
+## Historical URL-refusal handoff
 
-The issue and PR record the exact new revision/tree, four changed paths,
-source hashes, validation and operator command. This worklog is part of that
-immutable source. Independent follow-up review uses
+At that handoff, the issue and PR recorded the revision/tree, four changed paths,
+source hashes, validation and operator command. That immutable source's
+independent follow-up review used
 43bbb0486d0a3763a6f15ec4136830a8f04c29b4 as its comparison base and includes
 the parser/tests and changed plan/worklog evidence. Keep current/base payload
 within 192 KiB; describe-only launches no Claude. Existing completed helper
@@ -207,6 +207,15 @@ separate from the USD20 application benchmark cap.
   e3a1f6e CI (3936 tests plus 63 subtests per Python version and 78 browser tests)
   and the operator's private integration rehearsal are historical evidence,
   not review or CI of this correction. The e3a1f6e owner question is superseded.
+- Actual ordinary Claude Code 2.1.319 reviewed all five changed paths at
+  2804a9d7b531305bf0b2a80a6ceb9c1f6c2e7ac7 against e3a1f6e, with key
+  30fa5e8e4f9b3498af90850974a271a9172d31c5715ccb99a985dd422f6cd451.
+  The model command completed in 19.899929 seconds with zero permission denials;
+  all nine supervised groups were absent after retirement and scratch was
+  removed. One P3 identified stale prior-handoff wording, now explicitly marked
+  historical. No code finding was reported. The reviewer ran no tests and did
+  not inspect the unchanged helper. This is that revision's evidence; the final
+  worklog correction requires its own committed-source review.
 - Freeze these five changed files with e3a1f6e as the comparison base for the
   installed ordinary Claude helper. This commit precedes its real final review
   and exact-head CI; actual availability, findings/triage, source/key bindings,
