@@ -7,6 +7,10 @@ closure and prior-worker retirement, Root promoted the next Native12 Source/iner
 metadata-correction phase. Native runtime acceptance remains incomplete. Corpus16
 is blocked after automatic research review refusals; its existing Claude-led
 research is preserved. Only PyJWT is currently admitted.
+The workflow report contract is a separate preparatory implementation task after
+CORE11 and CLAUDE13. Its bound issue requires explicit operator promotion. It owns
+only new files. Fresh-process execution and shared product integration retain
+their existing Native12 and PROCESS14 dependencies.
 These are the actual [repository issues](https://github.com/utkutugrul/review-boundary/issues).
 
 The owner authorizes verified project PR delivery without more permission
@@ -146,6 +150,32 @@ permitted only for future pending tasks.
       "evidence": []
     },
     {
+      "id": "workflow-report-contract",
+      "title": "Define a standalone workflow run report contract from delivered core results",
+      "issue": "https://github.com/utkutugrul/review-boundary/issues/28",
+      "owner": "Codex",
+      "reviewer": "Claude",
+      "status": "backlog",
+      "dependencies": [
+        "core-11",
+        "claude-13"
+      ],
+      "acceptance": [
+        "Add bounded deterministic assembly and validation of a versioned workflow run report using unchanged CORE11 scored rows; distinguish each scored case from the complete run and preserve existing metric meanings.",
+        "Declare expected case/session coverage and case/run/reviewer/guard/epoch bindings; reject duplicate or mismatched rows and preserve missing sessions, incomplete runs, unknowns and failure denominators.",
+        "Keep recorded_data_only and unavailable authenticity explicit. Scripted fixtures are labeled scripted; report data, hashes and claimed metadata cannot establish process execution, model behavior, judgments or authority.",
+        "Own only new src/review_boundary/workflow_report.py, tests/test_workflow_report.py, tests/fixtures/workflow_reports/*.json and docs/workflow-report-contract.md. Preserve all existing files, including the complete Native56 custody roster and delivered CORE11 sources.",
+        "Do not add shared CLI/dashboard/export/comparison/adjudication dispatch, native or SDK imports, provider calls, budget operations, process execution or lifecycle implementation. Report required shared changes to the operator for later tasks.",
+        "Require explicit operator promotion through the existing Symphony/GitHub workflow before implementation. Finish with actual independent Claude final-source review and a reviewable PR; this preparatory task does not complete PROCESS14 or REPORTS15."
+      ],
+      "validation": [
+        "Check nominal and missing, duplicate, mismatched, incomplete and unknown records, forged authority claims, deterministic serialization and unchanged CORE11 metric values on supported Python runtimes.",
+        "Verify the exact changed-file roster is limited to the four allowed new paths/patterns, has no overlap with Native56 custody, and introduces no native/SDK/provider/process execution dependency.",
+        "Record scoped checks and genuine independent Claude review of the frozen final source; preserve partial or unavailable review outcomes without claiming approval or execution evidence."
+      ],
+      "evidence": []
+    },
+    {
       "id": "reports-15",
       "title": "Integrate workflow results with CLI, reports, comparison, and dashboard",
       "issue": "https://github.com/utkutugrul/review-boundary/issues/15",
@@ -153,7 +183,8 @@ permitted only for future pending tasks.
       "reviewer": "Claude",
       "status": "blocked",
       "dependencies": [
-        "process-14"
+        "process-14",
+        "workflow-report-contract"
       ],
       "acceptance": [
         "Versioned workflow reports/CLI/dashboard preserve unknowns, evidence bindings and paired controls."
@@ -248,7 +279,11 @@ the actual closed reviewer13 dependency and fresh matching claim; this delivery
 record alone never dispatches or authorizes runtime execution.
 Corpus16 dispatch stays off pending a relevant
 external review-state change; its scope and acceptance criteria are unchanged.
-Core11 is delivered, while14/15/17/18 retain their actual dependencies. Recheck
+Core11 is delivered, while14/15/17/18 retain their existing dependencies.
+REPORTS15 also requires the standalone workflow report contract. Task28 is bound
+to its actual issue and still requires explicit operator promotion. Its scope
+allows preparation in new files alongside Native12 without adopting Native
+inputs or implementing downstream integration. Recheck
 each task's actual role, dependency record and accepted inputs before promotion.
 No old native private operator is automatically adopted or executed. See [plan rules](../../PLANS.md) and
 [operations](../../symphony-operations.md).
