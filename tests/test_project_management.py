@@ -805,6 +805,78 @@ def test_live_claim_cannot_change_the_versioned_task_contract(change):
         )
 
 
+@pytest.mark.parametrize(
+    "change,message",
+    [
+        ("removed_report_dependency", "versioned plan"),
+        ("added_native_dependency", "versioned plan"),
+        ("switched_roles", "versioned plan"),
+        ("open_report_dependency", "still open/unknown"),
+        ("backlog_off", "explicit dispatch labels"),
+    ],
+)
+def test_workflow_dashboard_claim_keeps_roles_dependencies_and_promotion_gate(change, message):
+    # Offline fixtures exercise the issue32 binding without promoting its backlog issue.
+    value = snapshot()
+    value["issue"].update(
+        number=32,
+        html_url=management.ISSUE_URL + "32",
+        title="Render a standalone workflow report dashboard",
+        body=value["issue"]["body"]
+        .replace("#11 and #12", "#13 and #28")
+        .replace(
+            "Preserve two fresh sessions.", "Render a validated report with escaped unknowns."
+        ),
+    )
+    value["dependencies"] = [
+        {"number": n, "html_url": management.ISSUE_URL + str(n), "state": "closed"}
+        for n in (13, 28)
+    ]
+    tasks = registered_tasks()
+    assert (
+        management.check_live_claim(
+            value, tasks=tasks, expected_issue=32, manual_claims=[10], now=NOW
+        )
+        == 32
+    )
+    if change == "removed_report_dependency":
+        value["issue"]["body"] = value["issue"]["body"].replace("#13 and #28", "#13")
+        value["dependencies"].pop()
+    elif change == "added_native_dependency":
+        value["issue"]["body"] = value["issue"]["body"].replace("#13 and #28", "#13, #28 and #12")
+        value["dependencies"].append(
+            {"number": 12, "html_url": management.ISSUE_URL + "12", "state": "closed"}
+        )
+    elif change == "switched_roles":
+        value["issue"]["body"] = value["issue"]["body"].replace(
+            "Implementation lead: Codex\nIndependent reviewer: Claude",
+            "Implementation lead: Claude\nIndependent reviewer: Codex",
+        )
+        value["issue"]["labels"] = [
+            {"name": name}
+            for name in (
+                "symphony",
+                "dispatch:enabled",
+                "status:ready",
+                "owner:claude",
+                "review:codex",
+            )
+        ]
+    elif change == "open_report_dependency":
+        value["dependencies"][1]["state"] = "open"
+    else:
+        value["issue"]["labels"] = [
+            {"name": name}
+            for name in ("symphony", "status:backlog", "owner:codex", "review:claude")
+        ]
+    if change not in {"open_report_dependency", "backlog_off"}:
+        assert management.check_issue_snapshot(value, now=NOW) == 32
+    with pytest.raises(management.ManagementError, match=message):
+        management.check_live_claim(
+            value, tasks=tasks, expected_issue=32, manual_claims=[10], now=NOW
+        )
+
+
 def test_live_aggregate_bound_has_genuine_below_cap_control():
     records = fake_http_records()
     records[14]["body"] = records[14]["body"].replace("#11 and #12", "#11, #12, #15 and #16")
