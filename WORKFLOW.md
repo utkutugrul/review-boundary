@@ -70,7 +70,9 @@ Before any source change:
 
 Codex is the only Symphony app-server agent. Claude-led research and independent
 Claude review require the separately shipped real CLI bridge. If absent, report
-a blocker. Never impersonate Claude or substitute a Codex subagent.
+a blocker, except that GH-13 may implement this bootstrap capability. GH-13
+still requires an actual independent Claude review before delivery; an absent
+reviewer is never a pass. Never impersonate Claude or substitute a Codex subagent.
 The reviewer checks the final source/diff and actual evidence independently.
 
 Keep one bounded worklog of scope, changes, checks and unknowns. Keep the active

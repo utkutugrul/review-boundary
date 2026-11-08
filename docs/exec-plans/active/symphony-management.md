@@ -192,8 +192,10 @@ worker rechecks remain required. Claude-led work needs the real CLI bridge;
 a role label alone cannot supply it. Current dirty worktrees stay excluded until
 explicit ownership handoff.
 
-Next: review/land #10, preserve the completed owners' handoffs, ship #13, obtain
-launch acceptance, then explicitly promote one eligible task.
+Next: review/land #10, preserve the completed owners' handoffs and obtain launch
+acceptance. The first eligible pilot is Codex implementing the Claude bridge #13;
+its independent real Claude review must run before delivery. Then promote further
+eligible work explicitly. The missing bridge must not block its own implementation.
 See [plan rules](../../PLANS.md) and [operations](../../symphony-operations.md).
 
 Migration: finish only currently owned work and its verification/handoff. All new

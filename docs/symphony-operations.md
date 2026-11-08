@@ -27,6 +27,9 @@ The existing workshop document is unrelated and untouched.
    This document does not authorize installation, daemon start or auth changes.
 5. Ship/check the portable real Claude CLI bridge before its research/review tasks.
    No private helper path is published. Ordinary account usage is not promised free.
+   For bootstrap, Codex may implement #13 as the first explicitly promoted pilot
+   after launch acceptance. Its real independent Claude review must complete
+   before delivery; missing review blocks delivery, not bridge implementation.
 6. Obtain owner acceptance for launch. Keep workspace-write sandbox defaults.
    Dependency network/setup needs an explicit reviewed operating decision.
 
