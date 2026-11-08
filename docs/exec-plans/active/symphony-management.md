@@ -2,8 +2,9 @@
 
 Status: active delivery. Reviewer task13 and workflow core11 are delivered through
 PR20 and PR22; PR21 accepted the disjoint core/native custody contracts. Native12
-is in a managed Source-only phase. Corpus16 is explicitly promoted for genuine
-Claude-led research with Codex verification. Only PyJWT is currently admitted.
+is in a managed Source-only phase. Corpus16 is blocked after automatic research
+review refusals; its existing Claude-led research is preserved. Only PyJWT is
+currently admitted.
 These are the actual [repository issues](https://github.com/utkutugrul/review-boundary/issues).
 
 The owner authorizes verified project PR delivery without more permission
@@ -40,7 +41,7 @@ permitted only for future pending tasks.
       "evidence": [
         "Management delivery is implemented in PR19, PR20 and PR21. Final relevant management checks passed155 cases per supported local Python runtime; actual final independent Claude review and exact-head CI passed.",
         "The owner accepted setup and subsequently gave standing authorization for project PR approvals/merges without further permission questions. Root still verifies concrete delivery and exact heads; no self-review or failing-check bypass.",
-        "One existing pinned Symphony coordinator has actually dispatched and run controlled GitHub tasks. CORE11 and CLAUDE13 are delivered; NATIVE12 remains Source-only and CORPUS16 is explicitly promoted. No native runtime or model-robustness claim is inferred."
+        "One existing pinned Symphony coordinator has actually dispatched and run controlled GitHub tasks. CORE11 and CLAUDE13 are delivered; NATIVE12 remains Source-only. CORPUS16 was promoted and is now blocked with dispatch removed after automatic review refusals. No native runtime or model-robustness claim is inferred."
       ]
     },
     {
@@ -162,7 +163,7 @@ permitted only for future pending tasks.
       "issue": "https://github.com/utkutugrul/review-boundary/issues/16",
       "owner": "Claude",
       "reviewer": "Codex",
-      "status": "active",
+      "status": "blocked",
       "dependencies": [],
       "acceptance": [
         "Independent real cases have verified provenance, meaningful ground truth and honest source-group counts."
@@ -173,7 +174,8 @@ permitted only for future pending tasks.
       "evidence": [
         "The operator explicitly promoted GH16 for genuine installed-Claude-led research after reviewer13 and core11 delivery. Codex independently verifies claims; a role label is not research evidence.",
         "The task owns only nonnative corpus modules, fixtures, their direct tests and focused upstream/corpus docs. New third-party fixture execution requires a concrete Source-bound command plan and technical review; application-model runs are excluded.",
-        "Only PyJWT is currently admitted. Five additional independent groups remain the target, with genuine vulnerable/fixed/legitimate controls before admission."
+        "Only PyJWT is currently admitted. Five additional independent groups remain the target, with genuine vulnerable/fixed/legitimate controls before admission.",
+        "Actual research worker turns were rejected by automatic safety review. The coordinator misclassified those failed turns as normal completion and retried. The operator removed dispatch and marked issue16 blocked; no rerouting, access changes or fabricated admission. Existing research and the full corpus target remain preserved."
       ]
     },
     {
@@ -230,7 +232,8 @@ a role label alone cannot supply it. Current dirty worktrees stay excluded until
 explicit ownership handoff.
 
 Next: finish Native12 Source corrections and independent review before a bounded
-technical execution decision; conduct Corpus16 research in its disjoint scope.
+technical execution decision. Corpus16 dispatch stays off pending a relevant
+external review-state change; its scope and acceptance criteria are unchanged.
 Core11 is delivered, while14/15/17/18 retain their actual dependencies. Recheck
 each task's actual role, dependency record and accepted inputs before promotion.
 No old native private operator is automatically adopted or executed. See [plan rules](../../PLANS.md) and
