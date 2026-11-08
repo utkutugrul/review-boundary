@@ -166,7 +166,7 @@ permitted only for future pending tasks.
         "Keep recorded_data_only and unavailable authenticity explicit. Scripted fixtures are labeled scripted; report data, hashes and claimed metadata cannot establish process execution, model behavior, judgments or authority.",
         "Own only new src/review_boundary/workflow_report.py, tests/test_workflow_report.py, tests/fixtures/workflow_reports/*.json and docs/workflow-report-contract.md. Preserve all existing files, including the complete Native56 custody roster and delivered CORE11 sources.",
         "Do not add shared CLI/dashboard/export/comparison/adjudication dispatch, native or SDK imports, provider calls, budget operations, process execution or lifecycle implementation. Report required shared changes to the operator for later tasks.",
-        "Bind the actual issue in this plan and explicitly promote through the existing Symphony/GitHub workflow before implementation. Finish with actual independent Claude final-source review and a reviewable PR; this preparatory task does not complete PROCESS14 or REPORTS15."
+        "Require explicit operator promotion through the existing Symphony/GitHub workflow before implementation. Finish with actual independent Claude final-source review and a reviewable PR; this preparatory task does not complete PROCESS14 or REPORTS15."
       ],
       "validation": [
         "Check nominal and missing, duplicate, mismatched, incomplete and unknown records, forged authority claims, deterministic serialization and unchanged CORE11 metric values on supported Python runtimes.",
