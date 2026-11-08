@@ -1,13 +1,18 @@
 # Symphony management and remaining milestones
 
-Status: proposed core and native custody handoff after delivered reviewer task13.
+Status: active delivery. Reviewer task13 and workflow core11 are delivered through
+PR20 and PR22; PR21 accepted the disjoint core/native custody contracts. Native12
+is in a managed Source-only phase. Corpus16 is explicitly promoted for genuine
+Claude-led research with Codex verification. Only PyJWT is currently admitted.
 These are the actual [repository issues](https://github.com/utkutugrul/review-boundary/issues).
-The previous manual writers have stopped. Claim10 remains held by the operator;
-claims11 and12 are released only on accepted landing of this custody proposal.
-Dispatch stays explicit and operator-controlled. Native Source review and runtime
-acceptance are separate and remain incomplete. Earlier scaffold/source-freeze
-statements below are historical, not authority for another launch or execution.
-Null links are permitted only for future pending tasks.
+
+The owner authorizes verified project PR delivery without more permission
+questions. Root retains concrete review, tests and exact-head merge checks.
+Claim10 remains held by the operator; claims11 and12 were released by accepted
+PR21. Dispatch stays explicit and operator-controlled. Native Source review and
+runtime acceptance are separate and incomplete. Historical scaffold/source-freeze
+evidence below is not authority for another launch or execution. Null links are
+permitted only for future pending tasks.
 
 ```json task-contract
 {
@@ -33,9 +38,9 @@ Null links are permitted only for future pending tasks.
         "Validate the bounded fixed-GitHub live gate with fake HTTP controls before launch."
       ],
       "evidence": [
-        "Root reviewed the management source and bound live roles/dependencies to the versioned plan.",
-        "All 47 offline management cases passed on Python 3.11 and 3.14; local contracts and Ruff checks passed.",
-        "No live API, installed Symphony loader, daemon or dispatch was exercised."
+        "Management delivery is implemented in PR19, PR20 and PR21. Final relevant management checks passed155 cases per supported local Python runtime; actual final independent Claude review and exact-head CI passed.",
+        "The owner accepted setup and subsequently gave standing authorization for project PR approvals/merges without further permission questions. Root still verifies concrete delivery and exact heads; no self-review or failing-check bypass.",
+        "One existing pinned Symphony coordinator has actually dispatched and run controlled GitHub tasks. CORE11 and CLAUDE13 are delivered; NATIVE12 remains Source-only and CORPUS16 is explicitly promoted. No native runtime or model-robustness claim is inferred."
       ]
     },
     {
@@ -44,7 +49,7 @@ Null links are permitted only for future pending tasks.
       "issue": "https://github.com/utkutugrul/review-boundary/issues/11",
       "owner": "Codex",
       "reviewer": "Claude",
-      "status": "blocked",
+      "status": "done",
       "dependencies": [
         "claude-13"
       ],
@@ -55,10 +60,10 @@ Null links are permitted only for future pending tasks.
         "Record scoped actual checks and independent final-source review in the issue/PR."
       ],
       "evidence": [
-        "All previous manual agents completed and stopped. The operator reverified the preserved 256-file core snapshot and 296-file native snapshot without differences.",
-        "Exactly ten frozen core candidate files and the documentation proposal have the expected byte counts and hashes in the intake table below. They are staged read-only in GH-11; the original dirty worktree remains preserved and inactive.",
-        "Historical frozen-core evidence includes 4003 passing tests per supported Python version, 78 browser tests, package and installed-wheel checks, and independent Claude review. New integration checks are still required.",
-        "Actual historical core verification report SHA256 51d77424fe71ec634d15df73c9640cf8e5340d911ac56cdbcc02d238bd53331d. This identifies prior evidence, not new integration or model results."
+        "Delivered by PR22 squash merge 2a44541f5610208cf4a15e77d905ddcef138bf2c; merged tree exactly matches reviewed head bdf23cad074fd095fa7032d263fdeff2bd6f5f28. Issue11 is closed and dispatch removed.",
+        "Actual current CI: 4185 Python tests and 63 subtests per supported runtime, 78 browser tests per job; 12 successful checks and two conditional publisher skips.",
+        "Two genuine ordinary Claude reviews cover all ten changed paths without findings. The local sandbox failures remain recorded; Root separately passed all 18 affected controls on each supported host runtime.",
+        "The bounded virtual Python core is delivered. Fresh-process model execution and shared CLI/report/dashboard integration remain tasks14 and15."
       ]
     },
     {
@@ -67,7 +72,7 @@ Null links are permitted only for future pending tasks.
       "issue": "https://github.com/utkutugrul/review-boundary/issues/12",
       "owner": "Codex",
       "reviewer": "Claude",
-      "status": "blocked",
+      "status": "active",
       "dependencies": [
         "claude-13"
       ],
@@ -81,9 +86,10 @@ Null links are permitted only for future pending tasks.
       ],
       "evidence": [
         "All original 63 changed native paths match the preserved snapshot. Six workflow modules/tests belong to CORE11; the README description is already delivered in main. Exactly 56 native candidates remain.",
-        "The dedicated GH-12 workspace contains those 56 read-only inputs only as ignored data. No product adoption, import, collection, runtime grant or native dispatch occurred.",
+        "Before PR21, the GH12 workspace contained the56inputs only as ignored data, without adoption or dispatch. PR21 accepted custody; the managed worker now authors integrated Source, while imports, collection and native execution remain unapproved.",
         "The separately frozen native operator remains NOT_READY_FOR_RUNTIME after partial independent review. Known Source corrections and all 50 selected runtime controls remain open.",
-        "The child-program context can reproduce all original 790743 JSON bytes from bounded quoted Source without omitting any of the 38 programs. This is reconstruction, not semantic review or execution."
+        "The child-program context can reproduce all original 790743 JSON bytes from bounded quoted Source without omitting any of the 38 programs. This is reconstruction, not semantic review or execution.",
+        "PR21 delivered custody at main1a59b54. Accepted56-file staging and actual closed13 dependency were verified before explicit promotion. The real GH12 worker is in its first Source-only phase, not runtime acceptance."
       ]
     },
     {
@@ -106,11 +112,10 @@ Null links are permitted only for future pending tasks.
         "Record scoped actual checks and independent final-source review in the issue/PR."
       ],
       "evidence": [
-        "Delivered through owner-authorized PR20 squash merge 4bc0110146c84467b870d5efaba5bc828a2989fb. Exact reviewed head ec5a306 passed final independent Claude delta review, Root checks and complete CI; issue13 is actually closed. Earlier Source-freeze and pending statements below remain historical.",
-        "Current CLI correction: 152 management tests pass on Python 3.11.15 and 3.14.10. New regression controls produced eight failures and four redaction passes against e3a1f6e before production edits. Final independent changed-source review and exact-head CI are recorded on GH-13 and PR20 after this source freeze; prior review/CI remains historical and owner acceptance WAIT.",
-        "GH-13 URL refusal follow-up: 140 management tests pass on Python 3.11.15 and 3.14.10; repository Ruff and management checks pass. Whole canonical URL tokens and bare references are consumed before refusing residual reference/URL-like text, including beside None. All original controls remain.",
-        "The operator reports completed independent normal-Claude current/base review of 43bbb0486d0a3763a6f15ec4136830a8f04c29b4: seven selected paths, zero denials, nine groups retired, scratch removed and unchanged source. Both CI runs passed for that revision. The helper, its tests and procedure remain byte-identical to that reviewed source and were not rerun. The new parser/test delta still needs independent review and fresh CI; the separate incomplete twelve-file review and earlier unavailable/failure outcomes remain explicit.",
-        "See gh-13-worklog.md for scope, observed failures, checks and delivery unknowns; material-risk acceptance remains WAIT."
+        "Delivered through owner-authorized PR20 squash merge 4bc0110146c84467b870d5efaba5bc828a2989fb. Reviewed head ec5a3063aca4c451d82ddf5f691cd2c8f6a68907 and merged tree match; issue13 is closed.",
+        "Root passed152management cases on each supported local Python runtime. Final genuine ordinary Claude current/base delta review completed without findings or permission denials; all nine supervised groups retired and scratch removed.",
+        "Actual final PR20 CI passed3948Python tests and63subtests per supported runtime,78browser tests and all active checks. Earlier URL-parser and redaction failures were corrected and their historical receipts retained.",
+        "See gh-13-worklog.md for detailed Source evolution, observed failures and scoped limitations. This coding-account CLI capability does not perform an application-provider benchmark or establish OS containment."
       ]
     },
     {
@@ -157,7 +162,7 @@ Null links are permitted only for future pending tasks.
       "issue": "https://github.com/utkutugrul/review-boundary/issues/16",
       "owner": "Claude",
       "reviewer": "Codex",
-      "status": "backlog",
+      "status": "active",
       "dependencies": [],
       "acceptance": [
         "Independent real cases have verified provenance, meaningful ground truth and honest source-group counts."
@@ -165,7 +170,11 @@ Null links are permitted only for future pending tasks.
       "validation": [
         "Record scoped actual checks and independent final-source review in the issue/PR."
       ],
-      "evidence": []
+      "evidence": [
+        "The operator explicitly promoted GH16 for genuine installed-Claude-led research after reviewer13 and core11 delivery. Codex independently verifies claims; a role label is not research evidence.",
+        "The task owns only nonnative corpus modules, fixtures, their direct tests and focused upstream/corpus docs. New third-party fixture execution requires a concrete Source-bound command plan and technical review; application-model runs are excluded.",
+        "Only PyJWT is currently admitted. Five additional independent groups remain the target, with genuine vulnerable/fixed/legitimate controls before admission."
+      ]
     },
     {
       "id": "service-17",
@@ -220,23 +229,26 @@ worker rechecks remain required. Claude-led work needs the real CLI bridge;
 a role label alone cannot supply it. Current dirty worktrees stay excluded until
 explicit ownership handoff.
 
-Next: land this reviewed custody proposal against actual main after reviewer
-issue13 delivery. The operator then checks each task's actual dependency/role
-record and accepted intake pins before explicit promotion. CORE11 and NATIVE12
-have distinct file scopes and can advance independently; neither may overwrite
-the other's accepted work. No old native private operator is automatically
-adopted or executed. See [plan rules](../../PLANS.md) and
+Next: finish Native12 Source corrections and independent review before a bounded
+technical execution decision; conduct Corpus16 research in its disjoint scope.
+Core11 is delivered, while14/15/17/18 retain their actual dependencies. Recheck
+each task's actual role, dependency record and accepted inputs before promotion.
+No old native private operator is automatically adopted or executed. See [plan rules](../../PLANS.md) and
 [operations](../../symphony-operations.md).
 
 Migration: new implementation/research goes through Symphony/GitHub, with one
-writer per issue/scope. Accepted landing releases only completed manual claims11
-and12. Claim10 remains held while the operator finishes management work. A plan
+writer per issue/scope. Accepted PR21 landing released completed manual claims11 and12. Claim10
+remains held while the operator finishes management work. A plan
 status coordinates open work; a terminal done record must be explicitly reopened
 in the versioned plan. Neither status grants a runtime claim or dispatch authority.
 Actual operating/review evidence is recorded in issues10/13; offline checks do
 not establish a live claim, model result or native execution authority.
 
 ## Controlled core handoff
+
+The proposal below is historical accepted custody evidence. PR21 landed it;
+PR22 subsequently delivered the core. Its old pre-landing descriptions do not
+reopen completed work or grant another dispatch.
 
 Landing this registry change requires explicit owner acceptance of this custody
 handoff. Before landing, main still protects #11. Accepted landing releases this
@@ -273,6 +285,10 @@ from these hashes. The operator requires #13 closed, the accepted registry and
 matching actual #11 roles/dependencies before adding dispatch:enabled.
 
 ## Controlled native handoff
+
+This section preserves the historical proposal accepted by PR21. Manual12 was
+released and the real GH12 worker is now in its first Source-only phase. The
+pre-landing descriptions below grant no new dispatch or runtime authority.
 
 The native file contract is [native-custody-inputs.json](native-custody-inputs.json),
 SHA-256 `c1d325b2836bd611719dff4adb50b1e51400d3ef146d6b729805441e683c8d00`. The operator must verify that committed identity, then
