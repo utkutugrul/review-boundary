@@ -17,6 +17,25 @@ SPEC = importlib.util.spec_from_file_location(
 management = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(management)
 NOW = datetime(2026, 11, 7, 20, tzinfo=UTC)
+UNSUPPORTED_DEPENDENCY_URLS = (
+    "http://github.com/other/repo/issues/5",
+    "github.com/other/repo/issues/5",
+    "HTTPS://github.com/other/repo/issues/5",
+    "https://github.com/other/repo/pull/5",
+    f"http://github.com/{management.REPOSITORY}/issues/11",
+    f"github.com/{management.REPOSITORY}/issues/11",
+    f"HTTPS://github.com/{management.REPOSITORY}/issues/11",
+    f"https://github.com/{management.REPOSITORY}/pull/11",
+    "https://github.com/other/repo/issues/5",
+    f"https://GITHUB.COM/{management.REPOSITORY}/issues/11",
+    f"prefix{management.ISSUE_URL}11",
+    f"{management.ISSUE_URL}0",
+    f"{management.ISSUE_URL}011",
+    *(
+        f"{management.ISSUE_URL}11{suffix}"
+        for suffix in ("/extra", "?x=1", "#5", "bad", ".5", ",bad")
+    ),
+)
 
 
 def registered_tasks():
@@ -236,6 +255,114 @@ def test_none_cannot_hide_a_real_dependency():
         management.check_issue_snapshot(value, now=NOW)
 
 
+@pytest.mark.parametrize(
+    "references",
+    [
+        "#11 and #12",
+        f"{management.ISSUE_URL}11 and {management.ISSUE_URL}12",
+        f"[Core]({management.ISSUE_URL}11) and #12",
+        f"[Core]({management.ISSUE_URL}11) and [Native]({management.ISSUE_URL}12)",
+        f"<{management.ISSUE_URL}11> and <{management.ISSUE_URL}12>",
+        f"- {management.ISSUE_URL}11\n- {management.ISSUE_URL}12",
+        "#11, #12.",
+    ],
+)
+def test_supported_dependency_references_keep_exact_plan_binding(references):
+    value = snapshot()
+    value["issue"]["body"] = value["issue"]["body"].replace("#11 and #12", references)
+    owners, dependencies = management.issue_contract(value["issue"]["body"])
+    assert owners == {"owner": "Codex", "reviewer": "Claude"}
+    assert dependencies == {11, 12}
+    assert (
+        management.check_live_claim(
+            value, tasks=registered_tasks(), expected_issue=14, manual_claims=[], now=NOW
+        )
+        == 14
+    )
+
+
+@pytest.mark.parametrize(
+    "unsupported",
+    [
+        "other/repo#5",
+        "other/repo.#5",
+        "other/repo-#5",
+        "GH-5",
+        "gh-5",
+        f"{management.REPOSITORY}#5",
+        "repo#5",
+        "#0",
+        "#05",
+    ],
+)
+@pytest.mark.parametrize("prefix", ["#11 and #12", "None.", ""])
+def test_unsupported_dependency_references_are_never_silently_dropped(unsupported, prefix):
+    value = snapshot()
+    assert management.check_issue_snapshot(value, now=NOW) == 14
+    if prefix != "#11 and #12":
+        value["dependencies"] = []
+    value["issue"]["body"] = value["issue"]["body"].replace(
+        "#11 and #12", f"{prefix} {unsupported}".strip()
+    )
+    with pytest.raises(management.ManagementError, match="unsupported issue-reference"):
+        management.check_issue_snapshot(value, now=NOW)
+
+
+@pytest.mark.parametrize("unsupported", ["other/repo#5", "GH-5"])
+def test_live_fetch_refuses_unsupported_dependencies_before_any_dependency_request(unsupported):
+    requests = []
+    value = fetch_fixture(fake_http_records(), requests)
+    assert management.check_issue_snapshot(value, now=NOW) == 14
+    records = fake_http_records()
+    records[14]["body"] = records[14]["body"].replace("#11 and #12", f"#11 and #12, {unsupported}")
+    requests.clear()
+    with pytest.raises(management.ManagementError, match="unsupported issue-reference"):
+        fetch_fixture(records, requests)
+    assert [request[0] for request in requests] == [
+        f"https://api.github.com/repos/{management.REPOSITORY}/issues/14"
+    ]
+
+
+@pytest.mark.parametrize("unsupported", UNSUPPORTED_DEPENDENCY_URLS)
+@pytest.mark.parametrize("context", ["alone", "supported", "none"])
+def test_unsupported_dependency_urls_are_refused_as_whole_tokens(unsupported, context):
+    records = fake_http_records()
+    prefix = "None." if context == "none" else "#11 and #12"
+    records[14]["body"] = records[14]["body"].replace("#11 and #12", prefix)
+    requests = []
+    value = fetch_fixture(records, requests)
+    assert management.check_issue_snapshot(value, now=NOW) == 14
+    owners, dependencies = management.issue_contract(value["issue"]["body"])
+    assert owners == {"owner": "Codex", "reviewer": "Claude"}
+    assert dependencies == (set() if context == "none" else {11, 12})
+    if context != "none":
+        assert (
+            management.check_live_claim(
+                value, tasks=registered_tasks(), expected_issue=14, manual_claims=[], now=NOW
+            )
+            == 14
+        )
+
+    changed = unsupported if context == "alone" else f"{prefix} {unsupported}"
+    records[14]["body"] = records[14]["body"].replace(prefix, changed)
+    message = (
+        "issue Dependencies: unsupported issue-reference form; use bare #N or canonical issue URLs"
+    )
+    # The snapshot and the real fetch path must refuse before asking for any
+    # dependency, even when a supported prefix or None would otherwise pass.
+    value["issue"]["body"] = records[14]["body"]
+    with pytest.raises(management.ManagementError) as caught:
+        management.check_issue_snapshot(value, now=NOW)
+    assert str(caught.value) == message
+    requests.clear()
+    with pytest.raises(management.ManagementError) as caught:
+        fetch_fixture(records, requests)
+    assert str(caught.value) == message
+    assert [request[0] for request in requests] == [
+        f"https://api.github.com/repos/{management.REPOSITORY}/issues/14"
+    ]
+
+
 def test_unreviewed_hook_and_unknown_status_are_rejected():
     config = management.workflow_config((ROOT / "WORKFLOW.md").read_text())
     management.check_config(config)
@@ -282,8 +409,12 @@ def test_before_run_cannot_drop_live_claim_gate():
         management.check_config(config)
 
 
-def test_unbound_manual_workspace_cannot_run_live_gate(capsys):
-    assert management.main(["--repo", str(ROOT), "--require-live-claim"]) == 1
+def test_unbound_manual_workspace_cannot_run_live_gate(tmp_path, monkeypatch, capsys):
+    workspace = tmp_path / "manual-checkout"
+    workspace.mkdir()
+    tasks = management.check_repo(ROOT)
+    monkeypatch.setattr(management, "check_repo", lambda root: tasks)
+    assert management.main(["--repo", str(workspace), "--require-live-claim"]) == 1
     assert "actual native GH-N" in capsys.readouterr().err
 
 
@@ -305,6 +436,167 @@ def fetch_fixture(records, requests=None, clock=lambda: 0):
     return management.fetch_live_snapshot(
         14, token="fixture-token", open_url=open_url, clock=clock, now=NOW
     )
+
+
+@pytest.fixture
+def cli_workspace(tmp_path, monkeypatch):
+    workspace = tmp_path / "GH-14"
+    (workspace / management.PLAN).parent.mkdir(parents=True)
+    (workspace / management.PLAN).write_text((ROOT / management.PLAN).read_text())
+    tasks = registered_tasks()
+    monkeypatch.setattr(management, "check_repo", lambda root: tasks)
+    return workspace
+
+
+@pytest.fixture
+def live_transport(monkeypatch):
+    records = fake_http_records()
+    previous = object()
+    state = {"handler": previous}
+    changes, requests = [], []
+    fake_signal = SimpleNamespace(SIGALRM=1, ITIMER_REAL=2)
+    fake_signal.getitimer = lambda kind: (0.0, 0.0)
+
+    def handler(kind, value):
+        old = state["handler"]
+        state["handler"] = value
+        changes.append(("handler", kind, value))
+        return old
+
+    fake_signal.signal = handler
+    fake_signal.setitimer = lambda kind, seconds: changes.append(("timer", kind, seconds))
+
+    def open_url(request, timeout):
+        number = int(request.full_url.rsplit("/", 1)[1])
+        requests.append(number)
+        return io.BytesIO(json.dumps(records[number]).encode())
+
+    monkeypatch.setattr(management, "signal", fake_signal)
+    monkeypatch.setattr(
+        management, "build_opener", lambda *handlers: SimpleNamespace(open=open_url)
+    )
+    return SimpleNamespace(
+        records=records, state=state, changes=changes, requests=requests, previous=previous
+    )
+
+
+def test_cli_distinguishes_offline_snapshot_from_live_fetch(
+    cli_workspace, live_transport, tmp_path, monkeypatch, capsys
+):
+    value = snapshot()
+    value["observed_at"] = datetime.now(UTC).isoformat()
+    path = tmp_path / "offline-fixture.json"
+    path.write_text(json.dumps(value))
+    monkeypatch.delenv("SYMPHONY_GITHUB_TOKEN", raising=False)
+    args = ["--repo", str(cli_workspace)]
+    assert management.main([*args, "--issue-snapshot", str(path)]) == 0
+    offline = capsys.readouterr()
+    assert "offline snapshot GH-14" in offline.out
+    assert "does not authenticate" in offline.out
+    assert "does not authorize promotion" in offline.out
+    assert not offline.err and not live_transport.requests
+
+    assert management.main([*args, "--require-live-claim"]) == 1
+    missing_auth = capsys.readouterr()
+    assert "explicit SYMPHONY_GITHUB_TOKEN" in missing_auth.err
+    assert not missing_auth.out and not live_transport.requests
+
+    monkeypatch.setenv("SYMPHONY_GITHUB_TOKEN", "fixture-token")
+    assert management.main([*args, "--require-live-claim"]) == 0
+    live = capsys.readouterr()
+    assert "live GitHub fetch GH-14" in live.out
+    assert "does not authorize promotion" in live.out
+    assert "offline snapshot" not in live.out and not live.err
+    assert live_transport.requests == [14, 11, 12]
+    assert live_transport.state["handler"] is live_transport.previous
+
+
+@pytest.mark.parametrize("live_first", [False, True])
+@pytest.mark.parametrize("existing_snapshot", [False, True])
+def test_cli_mixed_modes_are_refused_before_file_auth_or_network_access(
+    cli_workspace, tmp_path, monkeypatch, capsys, live_first, existing_snapshot
+):
+    value = snapshot()
+    value["observed_at"] = datetime.now(UTC).isoformat()
+    path = tmp_path / "offline-fixture.json"
+    path.write_text(json.dumps(value))
+    args = ["--repo", str(cli_workspace)]
+    assert management.main([*args, "--issue-snapshot", str(path)]) == 0
+    capsys.readouterr()
+    if not existing_snapshot:
+        path.unlink()
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("conflicting modes must be refused before any input or auth access")
+
+    monkeypatch.setattr(management, "check_repo", forbidden)
+    monkeypatch.setattr(management, "read_text", forbidden)
+    monkeypatch.setattr(management, "fetch_live_snapshot", forbidden)
+    monkeypatch.setattr(management, "os", SimpleNamespace(environ=SimpleNamespace(get=forbidden)))
+    flags = ["--issue-snapshot", str(path)]
+    flags = ["--require-live-claim", *flags] if live_first else [*flags, "--require-live-claim"]
+    with pytest.raises(SystemExit) as error:
+        management.main([*args, *flags])
+    assert error.value.code == 2
+    output = capsys.readouterr()
+    assert "not allowed with argument" in output.err
+    assert "--issue-snapshot" in output.err and "--require-live-claim" in output.err
+    assert not output.out
+
+
+@pytest.mark.parametrize("interrupted_decode", [1, 2, 3])
+def test_live_decode_deadline_preserves_fixed_diagnostic_and_restores_timer(
+    live_transport, monkeypatch, interrupted_decode
+):
+    value = management.fetch_live_snapshot(14, token="fixture-token", clock=lambda: 0, now=NOW)
+    assert management.check_issue_snapshot(value, now=NOW) == 14
+    original_decode = management.decode_json
+    calls = 0
+
+    def interrupted(text):
+        nonlocal calls
+        calls += 1
+        if calls == interrupted_decode:
+            live_transport.state["handler"](1, None)
+        return original_decode(text)
+
+    monkeypatch.setattr(management, "decode_json", interrupted)
+    with pytest.raises(management.ManagementError) as error:
+        management.fetch_live_snapshot(14, token="fixture-token", clock=lambda: 0, now=NOW)
+    assert str(error.value) == "live GitHub: absolute ten-second deadline exceeded"
+    assert calls == interrupted_decode
+    assert live_transport.changes[-2:] == [
+        ("timer", 2, 0),
+        ("handler", 1, live_transport.previous),
+    ]
+    assert live_transport.state["handler"] is live_transport.previous
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        b'{"untrusted-response":',
+        b'{"untrusted-duplicate":1,"untrusted-duplicate":2}',
+        b'{"untrusted-nonfinite":NaN}',
+        b'{"untrusted-encoding":"\xff"}',
+    ],
+)
+def test_live_invalid_json_keeps_duplicate_keys_and_response_contents_redacted(raw):
+    value = fetch_fixture(fake_http_records())
+    assert management.check_issue_snapshot(value, now=NOW) == 14
+    requests = []
+
+    def open_url(request, timeout):
+        requests.append(request.full_url)
+        return io.BytesIO(raw)
+
+    with pytest.raises(management.ManagementError) as error:
+        management.fetch_live_snapshot(
+            14, token="fixture-token", open_url=open_url, clock=lambda: 0, now=NOW
+        )
+    assert str(error.value) == "live GitHub: invalid JSON response; details omitted"
+    assert error.value.__suppress_context__
+    assert requests == [f"https://api.github.com/repos/{management.REPOSITORY}/issues/14"]
 
 
 def test_live_gate_uses_fixed_get_ids_and_explicit_credential_without_network():
