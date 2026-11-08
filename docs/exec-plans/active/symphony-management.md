@@ -4,9 +4,10 @@ Status: active project delivery. The OPS10 setup milestone, CORE11, CLAUDE13
 and standalone workflow report contract28 are delivered. PR21 accepted the
 disjoint core/native custody contracts. Native50 has scoped acceptance; Native12
 now prepares the SDK231 Source packet, with broader runtime and delivery work
-still open. Fresh-process execution and shared product integration retain their
-existing dependencies. Corpus16 remains blocked after automatic research review
-refusals; its research is preserved and only PyJWT is admitted.
+still open. Dashboard32 is a preparatory split of existing REPORTS15 UI scope;
+fresh-process execution and shared product integration retain their prerequisites.
+Corpus16 remains blocked after automatic research review refusals; its research
+is preserved and only PyJWT is admitted.
 These are the actual [repository issues](https://github.com/utkutugrul/review-boundary/issues).
 
 The owner authorizes verified project PR delivery without more permission
@@ -180,6 +181,35 @@ Null links are permitted only for future pending tasks.
       ]
     },
     {
+      "id": "workflow-dashboard",
+      "title": "Render a standalone workflow report dashboard",
+      "issue": "https://github.com/utkutugrul/review-boundary/issues/32",
+      "owner": "Codex",
+      "reviewer": "Claude",
+      "status": "backlog",
+      "dependencies": [
+        "claude-13",
+        "workflow-report-contract"
+      ],
+      "acceptance": [
+        "Own only seven new paths: src/review_boundary/workflow_dashboard.py; src/review_boundary/web/workflow-dashboard.css; src/review_boundary/web/workflow-dashboard.js; tests/test_workflow_dashboard.py; tests/web/workflow-dashboard.test.cjs; docs/workflow-dashboard.md; assets/workflow-dashboard.png.",
+        "Render one validated report through the unchanged workflow_report contract with bounded deterministic output, English overview/details and visible incomplete, unknown, recorded-data-only and scripted labels. Show only supplied metrics and denominators, with no invented ranking or authenticity.",
+        "Escape untrusted values and safely embed JSON. Local filters/details/export cannot execute content, fetch resources or run tools. Use existing dependencies only, with no SDK/native/provider/network or paid request.",
+        "Preserve every existing tracked byte, Native56 custody, CORE11 and report28 contract/fixtures. Do not edit CLI routing, shared parser/schema, the existing dashboard or README.",
+        "Package new CSS/JS assets and provide meaningful Python/Node checks, an installed keyless demo, short English usage and an actual final-renderer screenshot. Missing browser/screenshot facts remain unknown until observed.",
+        "Keep final common CLI/export/compare/adjudication and fresh-process integration with REPORTS15. This preparatory UI split does not complete Native12, PROCESS14, all REPORTS15 or benchmark18."
+      ],
+      "validation": [
+        "Verify the exact new-file roster is limited to src/review_boundary/workflow_dashboard.py; src/review_boundary/web/workflow-dashboard.css; src/review_boundary/web/workflow-dashboard.js; tests/test_workflow_dashboard.py; tests/web/workflow-dashboard.test.cjs; docs/workflow-dashboard.md; assets/workflow-dashboard.png, with no existing-file or Native56/CORE/report overlap.",
+        "Check invalid input, escaping, malicious embedded text, unknown/incomplete/scripted cases, determinism and packaged assets using selected Python tests and tests/web/*.test.cjs. Capture the actual final renderer, not a mockup.",
+        "Obtain one genuine ordinary Claude Source review over final code and necessary unchanged report/renderer context, separate from fixture/browser/asset validation. Preserve partial coverage, findings and actual cleanup; exact-head CI and Root acceptance remain required."
+      ],
+      "evidence": [
+        "Root created actual issue32 as backlog with dispatch disabled. Its body binds Codex implementation, Claude review and dependencies13/28; this plan binding does not promote or implement it.",
+        "All seven new paths are absent at base029cec3db7529f97de9c7c168b14049443a8eeda. Implementation, package/browser/screenshot evidence and final delivery remain pending."
+      ]
+    },
+    {
       "id": "reports-15",
       "title": "Integrate workflow results with CLI, reports, comparison, and dashboard",
       "issue": "https://github.com/utkutugrul/review-boundary/issues/15",
@@ -188,7 +218,8 @@ Null links are permitted only for future pending tasks.
       "status": "blocked",
       "dependencies": [
         "process-14",
-        "workflow-report-contract"
+        "workflow-report-contract",
+        "workflow-dashboard"
       ],
       "acceptance": [
         "Versioned workflow reports/CLI/dashboard preserve unknowns, evidence bindings and paired controls."
