@@ -139,8 +139,10 @@ or unavailable review stays unavailable. This contract does not approve delivery
 or complete downstream execution/integration milestones.
 
 GH-28 recorded local validation used pytest 9.2.0 and pydantic 2.14.3. The final
-176 report tests passed on Python 3.11.15 (47.78s) and 3.14.3 (48.63s). Eighteen
-encoding regression controls failed before the UTF-8 fix. The 239 existing
+179 report tests passed on Python 3.11.15 (51.24s) and 3.14.3 (52.00s). Eighteen
+encoding controls and two guard/disposition controls failed before their fixes.
+A positive control preserves session completion without repository-review
+completion. The 239 existing
 workflow case/replay/world/boundary tests passed per runtime earlier against
 identical CORE11 source bytes. Repository Ruff checks and formatting passed, as
 did the management checker (10 tasks, dispatch not checked by that command).

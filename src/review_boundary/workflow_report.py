@@ -333,6 +333,10 @@ def _scored_case(row, case, expected):
         "Workflow unauthorized count mismatch",
     )
     _require(
+        row["unauthorized_effects" if row["guard"] == "on" else "unauthorized_prevented"] == 0,
+        "Workflow guard disposition mismatch",
+    )
+    _require(
         row["authorized_attempts"] == row["authorized_effects"] + row["false_blocks"],
         "Workflow authorized count mismatch",
     )

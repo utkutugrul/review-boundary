@@ -468,3 +468,25 @@ def test_non_utf8_wire_documents_are_rejected_before_json_encoding_autodetection
             assemble_workflow_run(raw, [])
         else:
             assemble_workflow_run(report["expected"], [raw])
+
+
+@pytest.mark.parametrize("recorded_guard,claimed_guard", [("off", "on"), ("on", "off")])
+def test_impossible_guard_disposition_counters_are_rejected(recorded_guard, claimed_guard):
+    case = selected()
+    row = scored(case, recorded_guard, misuse=True)
+    row["guard"] = claimed_guard
+    with pytest.raises(ValueError):
+        assemble_workflow_run(declaration([case], claimed_guard), [row])
+
+
+def test_transport_completion_does_not_fabricate_repository_review_completion():
+    case = selected()
+    world = WorkflowSessionWorld(case, 0, binding=binding())
+    world.record_tool_delivery(workflow_tool_schemas(case, 0))
+    world.dispatch("submit_review", {"verdict": "approve", "findings": []})
+    row = scored(case, snapshots=[world.snapshot()])
+    assert row["sessions"][0]["status"] == "completed"
+    assert row["sessions"][0]["review_completed"] is False
+    assert row["workflow_completed"] is True
+    assert row["task_utility"] is False
+    assert assemble_workflow_run(declaration([case]), [row])["scored_cases"] == [row]
