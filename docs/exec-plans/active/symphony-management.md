@@ -1,12 +1,12 @@
 # Symphony management and remaining milestones
 
-Status: active delivery. Workflow core11 and the original reviewer capability
-were delivered through PR22 and PR20. Reviewer13 is explicitly reopened for
-retaining partial review evidence. PR21 accepted the disjoint core/native custody
-contracts; Native12 Source-only work waits for that reviewer follow-up. Corpus16
-is blocked after automatic research
-review refusals; its existing Claude-led research is preserved. Only PyJWT is
-currently admitted.
+Status: active delivery. Workflow core11, the original reviewer capability and
+its partial-evidence follow-up were delivered through PR22, PR20 and PR26.
+PR21 accepted the disjoint core/native custody contracts. After actual reviewer13
+closure and prior-worker retirement, Root promoted the next Native12 Source/inert
+metadata-correction phase. Native runtime acceptance remains incomplete. Corpus16
+is blocked after automatic research review refusals; its existing Claude-led
+research is preserved. Only PyJWT is currently admitted.
 These are the actual [repository issues](https://github.com/utkutugrul/review-boundary/issues).
 
 The owner authorizes verified project PR delivery without more permission
@@ -43,7 +43,7 @@ permitted only for future pending tasks.
       "evidence": [
         "Management delivery is implemented in PR19, PR20 and PR21. Final relevant management checks passed155 cases per supported local Python runtime; actual final independent Claude review and exact-head CI passed.",
         "The owner accepted setup and subsequently gave standing authorization for project PR approvals/merges without further permission questions. Root still verifies concrete delivery and exact heads; no self-review or failing-check bypass.",
-        "One existing pinned Symphony coordinator has actually dispatched controlled tasks. CORE11 and the original CLAUDE13 capability were delivered. CLAUDE13 is now reopened for partial evidence retention; NATIVE12 has no active worker or dispatch and waits for that follow-up. CORPUS16 remains blocked/off after automatic review refusals. No native or model-robustness claim follows."
+        "One existing pinned Symphony coordinator has actually dispatched controlled tasks. CORE11, original CLAUDE13 and its partial-evidence follow-up PR26 are delivered. NATIVE12 is now in a newly promoted Source/inert metadata-correction phase after actual issue13 closure and prior-worker retirement. CORPUS16 remains blocked/off after automatic review refusals. No Native runtime or model-robustness claim follows."
       ]
     },
     {
@@ -75,7 +75,7 @@ permitted only for future pending tasks.
       "issue": "https://github.com/utkutugrul/review-boundary/issues/12",
       "owner": "Codex",
       "reviewer": "Claude",
-      "status": "blocked",
+      "status": "active",
       "dependencies": [
         "claude-13"
       ],
@@ -92,7 +92,7 @@ permitted only for future pending tasks.
         "Before PR21, the GH12 workspace held the56inputs only as ignored data. PR21 accepted custody; subsequent managed Source corrections were frozen for operator review, without full native or SDK runtime acceptance.",
         "The separately frozen native operator remains NOT_READY_FOR_RUNTIME after partial independent review. Known Source corrections and all 50 selected runtime controls remain open.",
         "The child-program context can reproduce all original 790743 JSON bytes from bounded quoted Source without omitting any of the 38 programs. This is reconstruction, not semantic review or execution.",
-        "PR21 delivered custody at main1a59b54. Initial promotion verified the accepted56-file staging and then-closed13 dependency. The latest bounded Source worker genuinely retired; issue12 is in review with dispatch removed while the reopened reviewer follow-up and remaining Source verification are pending."
+        "PR21 delivered custody at main1a59b54. The initial promotion verified the accepted56-file staging and then-closed13 dependency. After the reopened reviewer follow-up landed as PR26/main d555890ba56783a60fe3c901bba88af7c49a7bbf and actual issue13 closed, Root verified prior delivery-worker retirement and explicitly promoted the next same12 Source/inert metadata-correction lease. New actual managed worker49077/session745f7f was observed on the sole coordinator; no Native50, SDK, observation/generator or other runtime authority follows."
       ]
     },
     {
@@ -101,7 +101,7 @@ permitted only for future pending tasks.
       "issue": "https://github.com/utkutugrul/review-boundary/issues/13",
       "owner": "Codex",
       "reviewer": "Claude",
-      "status": "ready",
+      "status": "done",
       "dependencies": [],
       "acceptance": [
         "Uses the installed ordinary Claude CLI with explicit frozen source scope and structured findings.",
@@ -117,12 +117,12 @@ permitted only for future pending tasks.
         "Verify evidence retention with trusted keyless CLI fixtures on both supported runtimes, preserving invalid-result, denial, cancellation and cleanup refusals."
       ],
       "evidence": [
-        "Delivered through owner-authorized PR20 squash merge 4bc0110146c84467b870d5efaba5bc828a2989fb. Reviewed head ec5a3063aca4c451d82ddf5f691cd2c8f6a68907 and merged tree match; issue13 was closed at that delivery; its follow-up is explicitly reopened below.",
+        "Original delivery: owner-authorized PR20 squash merge4bc0110146c84467b870d5efaba5bc828a2989fb. Reviewed head ec5a3063aca4c451d82ddf5f691cd2c8f6a68907 and merged tree match; issue13 closed at that delivery and was later explicitly reopened for the follow-up recorded below.",
         "Root passed152management cases on each supported local Python runtime. Final genuine ordinary Claude current/base delta review completed without findings or permission denials; all nine supervised groups retired and scratch removed.",
         "Actual final PR20 CI passed3948Python tests and63subtests per supported runtime,78browser tests and all active checks. Earlier URL-parser and redaction failures were corrected and their historical receipts retained.",
         "See gh-13-worklog.md for detailed Source evolution, observed failures and scoped limitations. This coding-account CLI capability does not perform an application-provider benchmark or establish OS containment.",
-        "Root explicitly reopens this record for issue13 after an actual Native12 incomplete review lost its validated structured output. The new helper/test/procedure follow-up is Source and keyless validation only until independent technical review; original PR20 delivery remains accepted.",
-        "The first follow-up worker correctly stopped at the unchanged completed-plan gate before Source edits. Issue13 is currently blocked with dispatch removed. This record reopening alone does not promote it: Root must merge the reviewed plan, re-fetch actual issue state and explicitly promote one managed writer whose fresh claim passes. No manual13 claim is added; manual10 stays with Root."
+        "PR25 explicitly reopened this record after an actual Native12 incomplete review lost validated structured output. Original PR20 remains accepted. The follow-up preserves validated partial_review separately while incomplete results remain unavailable/nonzero, with no implied approval; invalid, denied, cancellation and unknown-cleanup outcomes remain conservative.",
+        "Follow-up DELIVERED by owner-authorized PR26 as main d555890ba56783a60fe3c901bba88af7c49a7bbf, tree28054d4f3546db7f5cec1abba1c356c32525cea1 equal reviewed head538fb4fe6732fbb70011c633c89af6d7e5524966. Root verified all three Source hashes and the complete genuine ordinary-Claude review:13.841545s, three paths, zero findings/denials, all nine groups retired/bothEOF and scratch removed. Actual CI:12success/two conditional publisher skips,4189tests/94subtests and78browser cases per supported job. Keyless local31CLI controls/155management cases passed each3.11.15/3.14.3; actual CI used3.11.14/3.14.4. Prior delivery worker39572 retired, issue13 closed, no extra permission question or fabricated self-approval. Original lost review contents remain unknown; broader Native acceptance stays open."
       ]
     },
     {
@@ -242,9 +242,10 @@ worker rechecks remain required. Claude-led work needs the real CLI bridge;
 a role label alone cannot supply it. Current dirty worktrees stay excluded until
 explicit ownership handoff.
 
-Next: finish the reopened reviewer13 evidence-retention follow-up, then recheck
-its actual closed state before promoting Native12. Complete Native12 Source
-corrections and independent review before a bounded technical execution decision.
+Next: finish the current Native12 Source corrections and independent review
+before a bounded technical execution decision. Every promotion still rechecks
+the actual closed reviewer13 dependency and fresh matching claim; this delivery
+record alone never dispatches or authorizes runtime execution.
 Corpus16 dispatch stays off pending a relevant
 external review-state change; its scope and acceptance criteria are unchanged.
 Core11 is delivered, while14/15/17/18 retain their actual dependencies. Recheck
