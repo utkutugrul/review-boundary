@@ -1,16 +1,17 @@
 # Symphony management and remaining milestones
 
-Status: Management scaffold validated offline; launch and first dispatch pending.
+Status: controlled CORE #11 handoff prepared for owner review.
 These are the actual [repository issues](https://github.com/utkutugrul/review-boundary/issues).
-All lack dispatch:enabled. The previous agents have stopped, but #10/#11/#12 retain
-manual handoff holds until their uncommitted sources are explicitly migrated.
-Null links are permitted only for future pending tasks.
+Dispatch remains operator-controlled. Completed manual owners have stopped;
+#10 and #12 retain their holds. Only #11 receives the verified continuation
+handoff described below, with no automatic dispatch or native runtime grant.
+Initial scaffold evidence below is historical; current runtime and delivery
+facts are recorded in the linked issues. Null links are for pending tasks only.
 
 ```json task-contract
 {
   "manual_claims": [
     10,
-    11,
     12
   ],
   "tasks": [
@@ -43,7 +44,7 @@ Null links are permitted only for future pending tasks.
       "issue": "https://github.com/utkutugrul/review-boundary/issues/11",
       "owner": "Codex",
       "reviewer": "Claude",
-      "status": "active",
+      "status": "ready",
       "dependencies": [],
       "acceptance": [
         "Final core APIs, docs and tests pass supported-version, package and independent review checks."
@@ -51,7 +52,11 @@ Null links are permitted only for future pending tasks.
       "validation": [
         "Record scoped actual checks and independent final-source review in the issue/PR."
       ],
-      "evidence": []
+      "evidence": [
+        "All previous manual agents completed and stopped. The operator reverified the preserved 256-file core snapshot and 296-file native snapshot without differences.",
+        "Exactly ten frozen core candidate files and the independently triaged documentation proposal are prepared read-only in the dedicated GH-11 workspace. The original dirty worktree remains preserved and inactive.",
+        "Historical frozen-core evidence includes 4003 passing tests per supported Python version, 78 browser tests, package and installed-wheel checks, and independent Claude review. New integration checks are still required."
+      ]
     },
     {
       "id": "native-12",
@@ -205,3 +210,19 @@ protect #10/#11/#12 until explicit owner handoff; role owner is not a runtime cl
 The one-shot host gate has offline fake-HTTP coverage: fixed GitHub HTTPS, registered GH-N
 identity/dependencies and explicit host token. Fake-HTTP checks and actual
 upstream host/config compatibility are distinct; only the former has run.
+
+
+## Controlled core handoff
+
+Only the completed #11 manual claim is released. Its verified ten-file continuation
+and exact documentation proposal are staged as ignored read-only input in the
+dedicated GH-11 workspace. The operator has custody; the old manual owner stays
+stopped and the original dirty worktree is unchanged. After an actual live claim
+passes, the managed #11 task may adopt only these inputs, finish its documentation
+and run integration checks against the current main revision.
+
+This registry change does not add dispatch:enabled, close a dependency, accept a
+PR or grant native execution. Holds #10 and #12 remain. PR #20 must be delivered
+before the real reviewer capability is used for the next managed delivery. The
+operator checks the actual issue and promotes #11 separately after this handoff
+is accepted and the reviewer prerequisite is available.
