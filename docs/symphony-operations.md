@@ -1,11 +1,15 @@
 # Symphony operations
 
-Prepared setup only, not an installed or running service.
+Configuration, claim checks and the independent Claude CLI bridge are shipped.
+The maintainer's owner-approved local coordinator has delivered tasks13 and11.
+Other installations must complete the launch checks below.
 [WORKFLOW.md](../WORKFLOW.md) uses the
 [pinned native GitHub adapter](https://github.com/openai/symphony/blob/be10a1b79df723d6d7612b5651c8522704dafb2e/elixir/README.md#github-issues-adapter).
 The [pinned loader](https://github.com/openai/symphony/blob/be10a1b79df723d6d7612b5651c8522704dafb2e/elixir/lib/symphony_elixir/workflow.ex)
 loads YAML as a map. Pretty JSON is valid YAML, allowing a stdlib checker.
-This is Source compatibility evidence; actual upstream loading is still unrun.
+These links define the reference contract. Actual local activation and delivery
+evidence are recorded in the [execution plan](exec-plans/active/symphony-management.md);
+static compatibility checks alone do not establish another installation's state.
 
 The [GitHub client](https://github.com/openai/symphony/blob/be10a1b79df723d6d7612b5651c8522704dafb2e/elixir/lib/symphony_elixir/github/client.ex)
 sets blocked_by to an empty list, so dependency gating is our explicit contract.
@@ -35,7 +39,7 @@ The existing workshop document is unrelated and untouched.
 
 ## Promotion and worker checks
 
-Initially no issue has dispatch:enabled. Operator fetches actual current dependency
+A fresh installation starts without enabled issues. The operator fetches actual current dependency
 issues, requires closed state, then explicitly adds symphony, status:ready and
 dispatch:enabled. Keep one status label; only ready/active may retain dispatch.
 Workers recheck before code. required_labels only filters labels.
@@ -72,19 +76,43 @@ Blocked/review removes dispatch:enabled after saving evidence. No automatic
 promotion/resumption. Removing a required label may stop the current session.
 Upstream in-memory blocked state clears on restart; labels/rechecks remain needed.
 
+## Failed turns and repeated dispatch
+
+The coordinator can report normal turn completion even when the actual task
+turn records a service failure. Inspect the current thread's terminal status
+and error category when repeated runs produce no new work. An activity label,
+session file or aggregate token counter cannot establish successful execution.
+
+For an automatic safety-review refusal, retain a sanitized reason, set the
+affected issue to status:blocked and remove dispatch:enabled. Verify that the
+same coordinator retires the worker and its retry queue. Preserve the original
+task and acceptance criteria. Resume only after an actual relevant external
+change; do not reroute or disguise the denied request or alter access settings
+to get around it. Keep unrelated eligible work separate.
+
+An observation timeout alone does not establish failure or retirement. Recheck
+the same live handle rather than starting another coordinator or writer.
+Missing cleanup evidence stays unknown. Keep raw service errors and private
+account/access details out of issues and repository artifacts.
+
 ## Review and delivery
 
 Codex app-server coordinates. Claude review/research uses the
 [ordinary CLI review procedure](claude-cli-review.md), independently of App Server.
 Record final source/diff identity, independent
 findings, actual checks and unknowns. Never relabel a Codex subagent as Claude.
-Leave a PR in status:review. Never automatically merge or publish gated approval/HOLD.
-Material risk remains WAIT for human acceptance. The application-test USD20 cap
+Workers leave a PR and issue in status:review for the operator. The operator
+uses recorded owner authorization and merges only the verified exact head.
+The current owner has authorized project PR delivery without repeated permission
+questions. Keep Source review, runtime execution and external activation
+decisions distinct; a source review cannot authorize itself. The application-test USD20 cap
 stays unchanged and does not cap ordinary coding-account usage.
 
 ## Controlled migration
 
-Current manual #10/#11/#12 cannot be claimed while their owners are active.
+Respect the actual manual_claims list in the versioned plan. PR21 released
+claims11 and12; claim10 remains with the operator. Active manual owners are
+exclusive until an explicit accepted handoff.
 Finish existing verification/handoff first; new work then goes only through
 Symphony/GitHub tasks, with no parallel manual cascade.
 
@@ -108,15 +136,17 @@ behavior is reviewed and verified; do not claim a hard DNS/cleanup guarantee.
 
 Offline --issue-snapshot remains usable in a matching GH-N workspace; supplied
 data does not establish API authenticity. The live CLI writes no snapshot/token. This local-only profile does not configure SSH.
-Current #10/#11/#12 stay denied until explicit handoff.
+Closed issues and completed plan records remain ineligible until an explicit
+versioned reopening; released claims still require fresh live dispatch checks.
 
 Activation is owner-controlled. Pinned CLI requires the explicit acknowledgement
 --i-understand-that-this-will-be-running-without-the-usual-guardrails.
 An operator must accept it for the concrete launch; never add it automatically
 or start a daemon from a task. A release version alone does not establish pinned
-source compatibility. Verify the installed revision/config first. No install or
-launch occurred.
+source compatibility. Verify the installed revision/config first and record
+actual activation separately from repository configuration.
 
 Local check: rtk proxy python3 scripts/check_project_management.py --repo .
-Focused/full tests, actual upstream load/start and the first dispatch pilot still
-need their respective review/authorization and actual evidence.
+The current local deployment has actual dispatch and delivery evidence. New
+profiles or installations need their own relevant verification; prior passing
+evidence applies only to its recorded Source and environment.
