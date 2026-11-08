@@ -386,5 +386,6 @@ def test_existing_test_workflow_runs_every_browser_suite_without_live_providers(
         "native-dashboard.test.cjs",
         "payload-report.test.cjs",
         "report-contracts.test.cjs",
+        "workflow-dashboard.test.cjs",
     }
     assert "evaluate-native-model.yml" not in str(value)
