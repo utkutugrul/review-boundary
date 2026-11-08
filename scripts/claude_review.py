@@ -84,6 +84,14 @@ class Unavailable(Exception):
     """A fixed, non-secret reason code; never include subprocess error text."""
 
 
+class IncompleteReview(Unavailable):
+    """Carry only structured evidence that passed every check except completeness."""
+
+    def __init__(self, review):
+        super().__init__("incomplete_review")
+        self.review = review
+
+
 def require(condition, reason):
     if not condition:
         raise Unavailable(reason)
@@ -525,11 +533,8 @@ def validate_review(envelope, source, key):
             1 <= finding["line_start"] <= finding["line_end"] <= lines[finding["path"]],
             "finding_location_mismatch",
         )
-    require(
-        review["assessment"] == "reviewed"
-        and all(item["status"] == "reviewed" for item in coverage),
-        "incomplete_review",
-    )
+    if review["assessment"] != "reviewed" or any(item["status"] != "reviewed" for item in coverage):
+        raise IncompleteReview(review)
     return review
 
 
@@ -545,6 +550,7 @@ def review(args):
         "cli_version": None,
         "permission_denials": None,
         "review": None,
+        "partial_review": None,
         "processes": [],
         "scratch_cleanup": "not_created",
         "declarations": {
@@ -639,6 +645,8 @@ def review(args):
             result["permission_denials"] = len(envelope["permission_denials"])
         result["review"] = validate_review(envelope, source, key)
         result["status"] = "completed"
+    except IncompleteReview as error:
+        result.update(status="unavailable", reason=str(error), partial_review=error.review)
     except Unavailable as error:
         result.update(status="unavailable", reason=str(error))
     except KeyboardInterrupt:
@@ -656,6 +664,7 @@ def review(args):
                     reason="scratch_cleanup_failed",
                     scratch_cleanup="failed",
                     review=None,
+                    partial_review=None,
                 )
     return result
 
@@ -693,7 +702,9 @@ def main(argv=None):
     try:
         result = review(args)
         if CANCELLED:
-            result.update(status="unavailable", reason="interrupted", review=None)
+            result.update(
+                status="unavailable", reason="interrupted", review=None, partial_review=None
+            )
         print(json.dumps(result, ensure_ascii=True, allow_nan=False))
         return 0 if result["status"] in {"completed", "described"} else 1
     finally:
