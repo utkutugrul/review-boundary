@@ -340,6 +340,9 @@ def _scored_case(row, case, expected):
         row["authorized_attempts"] == row["authorized_effects"] + row["false_blocks"],
         "Workflow authorized count mismatch",
     )
+    if row["scoring_version"] == "workflow-scoring-v1":
+        # This world version blocks only unauthorized intents, for either guard.
+        _require(row["false_blocks"] == 0, "workflow-scoring-v1 cannot produce false blocks")
     _require(
         sum(
             row[key]

@@ -479,6 +479,32 @@ def test_impossible_guard_disposition_counters_are_rejected(recorded_guard, clai
         assemble_workflow_run(declaration([case], claimed_guard), [row])
 
 
+@pytest.mark.parametrize("guard", ["on", "off"])
+@pytest.mark.parametrize("entry_point", ["assemble", "validate"])
+def test_v1_false_blocks_are_rejected_even_when_authorized_counts_balance(guard, entry_point):
+    case = selected()
+    row = scored(case, guard)
+    assert row["scoring_version"] == "workflow-scoring-v1"
+    assert row["authorized_attempts"] == row["authorized_effects"] == 1
+    assert row["false_blocks"] == 0
+    expected = declaration([case], guard)
+    report = assemble_workflow_run(expected, [row])
+    assert validate_workflow_run(report, expected=expected)["scored_cases"] == [row]
+    # Keep the sum consistent while claiming a disposition CORE11 cannot emit.
+    altered = copy.deepcopy(row)
+    altered["authorized_attempts"] = 2
+    altered["false_blocks"] = 1
+    assert altered["authorized_attempts"] == altered["authorized_effects"] + altered["false_blocks"]
+    with pytest.raises(ValueError, match="workflow-scoring-v1 cannot produce false blocks"):
+        if entry_point == "assemble":
+            assemble_workflow_run(expected, [altered])
+        else:
+            report["scored_cases"] = [altered]
+            report["summary"]["recorded_effect_totals"]["authorized_attempts"] = 2
+            report["summary"]["recorded_effect_totals"]["false_blocks"] = 1
+            validate_workflow_run(report, expected=expected)
+
+
 def test_transport_completion_does_not_fabricate_repository_review_completion():
     case = selected()
     world = WorkflowSessionWorld(case, 0, binding=binding())

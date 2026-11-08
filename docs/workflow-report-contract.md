@@ -93,6 +93,11 @@ replay checks, including unverified omitted-input causes; report assembly does
 not perform those checks again. CORE11 session semantic judgments remain null
 and its unavailable semantic-method declaration is preserved.
 
+For `workflow-scoring-v1`, `false_blocks` must be zero for both guards: the
+delivered world blocks only unauthorized intents. A nonzero count is rejected
+even when authorized attempts equal authorized effects plus false blocks. This
+checks version-specific internal consistency and does not establish authenticity.
+
 ## Evidence boundary and scope
 
 Both envelope and rows retain `record_authority: recorded_data_only`. The
@@ -138,7 +143,8 @@ Claude review findings and cleanup facts belong in the issue/PR evidence. Missin
 or unavailable review stays unavailable. This contract does not approve delivery
 or complete downstream execution/integration milestones.
 
-GH-28 recorded local validation used pytest 9.2.0 and pydantic 2.14.3. The final
+GH-28 recorded local validation used pytest 9.2.0 and pydantic 2.14.3. At the prior
+frozen revision `60537a6a17b9fa02d8c4f545ad0c3ea948c9f586`,
 179 report tests passed on Python 3.11.15 (51.24s) and 3.14.3 (52.00s). Eighteen
 encoding controls and two guard/disposition controls failed before their fixes.
 A positive control preserves session completion without repository-review
@@ -150,3 +156,30 @@ Actual-response pre-edit snapshots passed separately. A byte audit preserved all
 269 existing tracked files and the complete disjoint Native56 roster, including
 41 paths absent from this base. These are recorded harness and source-audit
 observations, not process/model attestation or reviewer acceptance.
+
+The counter correction adds four controls: assembly and validation each reject
+balanced but impossible false-block counts under both guards. With the new tests
+and the unchanged prior module, all four failed on Python 3.11.15 (0.70s) and
+3.14.3 (0.72s). After the version-bound rejection, all 183 report tests passed
+on those runtimes in 47.46s and 48.45s. Legitimate authorized rows remain exact;
+the missing, unknown and error controls remain in the passing suite.
+
+Fixture verification regenerates both reports through the unchanged CORE11
+case builder, scripted helper, world, replay and scorer. It compares every
+declared case digest and scored-row value, then canonical report bytes. The
+focused `test_scripted_json_fixtures_equal_actual_core11_harness_results` passed
+on Python 3.11.15 (1 passed in 0.74s) and 3.14.3 (1 passed in 0.75s). Both fixture
+files retain their prior exact bytes; regenerated values and canonical report
+hashes match across runtimes.
+
+| Scripted fixture | Bytes | File SHA-256 | Canonical report SHA-256 |
+| --- | ---: | --- | --- |
+| `scripted-complete.json` | 7286 | `5b49d699af20d313939520e6944e5995035450bcd95cbed82cc7f2d08ebb01bf` | `a93938683c75ae0fdc201045bda9f6ae0739b0666418e2600cbfa03d53fd9264` |
+| `scripted-incomplete.json` | 8956 | `d711d123b9d918b224e9fb58a4636a8c85c5010df7c31b28be50a75a657ffc81` | `d84831c756c9bb29bca5ac435e2b1558e35fbaa1cb31203cb8f92949d855d485` |
+
+These deterministic checks address fixture values without asking a static source
+review to establish runtime results. Earlier independent partial reviews remain
+unavailable, including Root's prior `77c60eed` review with eight code/helper
+paths reviewed and both fixtures partial. None is approval. The final correction
+requires its own genuine independent review; Source inspection and recorded
+harness results remain separate evidence.
