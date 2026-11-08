@@ -254,6 +254,31 @@ Null links are permitted only for future pending tasks.
       ]
     },
     {
+      "id": "service-store-contract",
+      "title": "Add a standalone durable service job store",
+      "issue": "https://github.com/utkutugrul/review-boundary/issues/36",
+      "owner": "Codex",
+      "reviewer": "Claude",
+      "status": "backlog",
+      "dependencies": [
+        "claude-13"
+      ],
+      "acceptance": [
+        "Own only three NEW paths: src/review_boundary/github_service_store.py; tests/test_github_service_store.py; docs/github-service-store.md. Preserve every existing file, Native custody input and private runtime/proof root; no HTTP or CLI wiring.",
+        "Use standard-library SQLite at an explicit trusted local path for bounded versioned job identities, persistent idempotency and transactional owner/generation leases. Identical requests retain their original record; changed identity conflicts and stale writers cannot complete work.",
+        "Keep caller-supplied run/attempt/artifact references unverified and unknowns distinct. Expiry or ambiguous outcome never proves worker retirement or authorizes automatic repetition. Store no credentials, request/report bodies, private source, provider errors or unbounded history.",
+        "Bound records plus tombstones to 10000, strings/error categories/batches and busy timeout to 1000ms. Retention preserves idempotency and pending/leased/unknown records; capacity exhaustion refuses intake.",
+        "Demonstrate real temporary-database persistence, close/reopen, independent connections, competing claims, stale generations, retention and failure paths. No provider/network/server/worker activation, evaluator, shell dispatch, new dependency or global configuration change."
+      ],
+      "validation": [
+        "Run selected meaningful SQLite controls on supported Python 3.11.15/3.14.3 with bytecode, plugins and test caches disabled; verify independent identity/type/size/time/state/binding refusals and honest ambiguous outcomes.",
+        "Check the exact three-new-file scope, scoped lint/format/management contracts and local wheel inclusion. Obtain one genuine ordinary installed Claude final-Source review through the unchanged bridge; preserve partial/failed results and exact-head CI/Root acceptance."
+      ],
+      "evidence": [
+        "Root created actual issue36 backlog with dispatch disabled, Codex implementation, Claude review and dependency13. Actual13 is closed. This plan binding does not implement or promote it; full SERVICE17 retains Native12/REPORTS15 and must later integrate the store."
+      ]
+    },
+    {
       "id": "service-17",
       "title": "Deliver opt-in self-hosted GitHub report service",
       "issue": "https://github.com/utkutugrul/review-boundary/issues/17",
@@ -262,7 +287,8 @@ Null links are permitted only for future pending tasks.
       "status": "blocked",
       "dependencies": [
         "native-12",
-        "reports-15"
+        "reports-15",
+        "service-store-contract"
       ],
       "acceptance": [
         "Service isolation, installation and delivery are reviewed and actually verified before launch."
