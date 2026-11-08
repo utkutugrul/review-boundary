@@ -893,7 +893,7 @@ def test_workflow_dashboard_claim_keeps_roles_dependencies_and_promotion_gate(ch
     ],
 )
 def test_service_store_claim_keeps_roles_dependencies_and_promotion_gate(change, message):
-    # Offline ready data checks the binding; it cannot promote the actual issue36.
+    # Only an explicit offline plan reopening can exercise a delivered task's live claim.
     value = snapshot()
     value["issue"].update(
         number=36,
@@ -907,6 +907,11 @@ def test_service_store_claim_keeps_roles_dependencies_and_promotion_gate(change,
         {"number": 13, "html_url": management.ISSUE_URL + "13", "state": "closed"}
     ]
     tasks = registered_tasks()
+    with pytest.raises(management.ManagementError, match="completed plan task"):
+        management.check_live_claim(
+            value, tasks=tasks, expected_issue=36, manual_claims=[10], now=NOW
+        )
+    next(task for task in tasks if task["id"] == "service-store-contract")["status"] = "ready"
     assert (
         management.check_live_claim(
             value, tasks=tasks, expected_issue=36, manual_claims=[10], now=NOW
