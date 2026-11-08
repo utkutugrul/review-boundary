@@ -20,6 +20,11 @@ or status:blocked. Only ready/active may carry dispatch:enabled. An operator
 promotes explicitly after actual dependency issues are closed; workers recheck.
 Open/closed issue state is separate from these labels.
 
+Versioned plan records may also use `done` to retain delivered tasks and their
+dependency links. This does not add a GitHub `status:done` label. A completed plan
+record cannot dispatch again until it is explicitly reopened in the versioned
+plan, even when its actual GitHub issue has been reopened and labeled ready.
+
 Local check: rtk proxy python3 scripts/check_project_management.py --repo .
 Offline dispatch checking validates a supplied fresh issue snapshot. Live mode
 fetches the issue and its dependencies using explicit read-only GitHub requests.

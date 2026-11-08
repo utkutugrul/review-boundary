@@ -42,9 +42,11 @@ Workers recheck before code. required_labels only filters labels.
 The gate requires issue roles and dependency references to match the versioned
 plan. Update and review both records when changing scope; editing the issue body
 alone cannot remove a dependency or switch its delivery roles.
-Plan status is coordination metadata, not another dispatch authorization gate.
-Registered roles/dependencies, manual claims and fresh GitHub state/labels form
-the gate; explicit operator promotion remains required.
+Open-task plan statuses are coordination metadata. A terminal `done` record
+requires an explicit versioned plan reopening before it can dispatch again,
+even if its GitHub issue is reopened and labeled ready. Registered
+roles/dependencies, manual claims and fresh GitHub state/labels form the gate;
+explicit operator promotion remains required.
 
 Use host github_api GET /repos/utkutugrul/review-boundary/issues/N and every dependency.
 Build a private snapshot from actual responses using only:
