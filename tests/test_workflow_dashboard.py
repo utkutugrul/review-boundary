@@ -296,6 +296,56 @@ class WorkflowDashboardTests(unittest.TestCase):
             self.assertFalse(stdout.getvalue())
             self.assertFalse((root / "out.html").exists())
 
+    def test_failed_write_or_publication_leaves_no_partial_output_or_staging_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, output = root / "report.json", root / "dashboard.html"
+            source.write_bytes((FIXTURES / "scripted-incomplete.json").read_bytes())
+            original_open = io.open
+
+            class PartialWriter:
+                def __init__(self, stream):
+                    self.stream = stream
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *args):
+                    return self.stream.__exit__(*args)
+
+                def write(self, data):
+                    self.stream.write(data[: len(data) // 2])
+                    self.stream.flush()
+                    raise OSError("simulated partial write")
+
+            def failing_open(file, mode="r", *args, **kwargs):
+                stream = original_open(file, mode, *args, **kwargs)
+                return (
+                    PartialWriter(stream)
+                    if "b" in mode and ("w" in mode or "x" in mode)
+                    else stream
+                )
+
+            with (
+                patch.object(io, "open", side_effect=failing_open),
+                self.assertRaisesRegex(dashboard.WorkflowDashboardError, "Cannot write"),
+            ):
+                dashboard.write_workflow_dashboard(source, output)
+            self.assertFalse(output.exists())
+            self.assertEqual(list(root.glob(".workflow-dashboard-*")), [])
+            for operation in ("fsync", "link"):
+                with (
+                    self.subTest(operation=operation),
+                    patch.object(dashboard.os, operation, side_effect=OSError("simulated failure")),
+                    self.assertRaisesRegex(dashboard.WorkflowDashboardError, "Cannot write"),
+                ):
+                    dashboard.write_workflow_dashboard(source, output)
+                self.assertFalse(output.exists())
+                self.assertEqual(list(root.glob(".workflow-dashboard-*")), [])
+            dashboard.write_workflow_dashboard(source, output)
+            self.assertEqual(Document(output.read_text()).report(), fixture())
+            self.assertEqual(list(root.glob(".workflow-dashboard-*")), [])
+
 
 if __name__ == "__main__":
     unittest.main()

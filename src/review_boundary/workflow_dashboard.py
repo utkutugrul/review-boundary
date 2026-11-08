@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import stat
+import tempfile
 from html import escape
 from importlib.resources import files
 from pathlib import Path
@@ -358,14 +359,28 @@ def write_workflow_dashboard(report_path, output, *, expected=None):
     """Write a new HTML file only after validation. Never overwrite an existing path."""
     html = render_workflow_dashboard(_read_input(Path(report_path)), expected=expected)
     output = Path(output)
+    temporary = None
     try:
         output.parent.mkdir(parents=True, exist_ok=True)
-        with output.open("xb") as stream:
+        descriptor, name = tempfile.mkstemp(prefix=".workflow-dashboard-", dir=output.parent)
+        temporary = Path(name)
+        with os.fdopen(descriptor, "wb") as stream:
             stream.write(html.encode("utf-8"))
+            stream.flush()
+            os.fsync(stream.fileno())
+        # Linking a complete same-directory file publishes atomically and fails
+        # if any destination already exists, including a symlink or hardlink.
+        os.link(temporary, output)
     except FileExistsError as error:
         raise WorkflowDashboardError("Output already exists; choose a new HTML path") from error
     except OSError as error:
         raise WorkflowDashboardError("Cannot write dashboard HTML file") from error
+    finally:
+        if temporary is not None:
+            try:
+                temporary.unlink()
+            except OSError as error:
+                raise WorkflowDashboardError("Cannot remove dashboard staging file") from error
     return output
 
 
