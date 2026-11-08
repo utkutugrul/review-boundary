@@ -1,25 +1,22 @@
 # Symphony management and remaining milestones
 
-Status: active delivery. Workflow core11, the original reviewer capability and
-its partial-evidence follow-up were delivered through PR22, PR20 and PR26.
-PR21 accepted the disjoint core/native custody contracts. After actual reviewer13
-closure and prior-worker retirement, Root promoted the next Native12 Source/inert
-metadata-correction phase. Native runtime acceptance remains incomplete. Corpus16
-is blocked after automatic research review refusals; its existing Claude-led
-research is preserved. Only PyJWT is currently admitted.
-The workflow report contract is a separate preparatory implementation task after
-CORE11 and CLAUDE13. Its bound issue requires explicit operator promotion. It owns
-only new files. Fresh-process execution and shared product integration retain
-their existing Native12 and PROCESS14 dependencies.
+Status: active project delivery. The OPS10 setup milestone, CORE11, CLAUDE13
+and standalone workflow report contract28 are delivered. PR21 accepted the
+disjoint core/native custody contracts. Native50 has scoped acceptance; Native12
+now prepares the SDK231 Source packet, with broader runtime and delivery work
+still open. Fresh-process execution and shared product integration retain their
+existing dependencies. Corpus16 remains blocked after automatic research review
+refusals; its research is preserved and only PyJWT is admitted.
 These are the actual [repository issues](https://github.com/utkutugrul/review-boundary/issues).
 
 The owner authorizes verified project PR delivery without more permission
 questions. Root retains concrete review, tests and exact-head merge checks.
-Claim10 remains held by the operator; claims11 and12 were released by accepted
-PR21. Dispatch stays explicit and operator-controlled. Native Source review and
-runtime acceptance are separate and incomplete. Historical scaffold/source-freeze
-evidence below is not authority for another launch or execution. Null links are
-permitted only for future pending tasks.
+Claim10 remains reserved for Root operator custody after setup delivery;
+claims11 and12 were released by PR21. Completing the setup milestone does not
+complete the full goal or stop Root orchestration. Dispatch stays explicit and
+operator-controlled. Native Source review, scoped controls and full runtime
+acceptance remain distinct. Historical evidence grants no new execution.
+Null links are permitted only for future pending tasks.
 
 ```json task-contract
 {
@@ -33,7 +30,7 @@ permitted only for future pending tasks.
       "issue": "https://github.com/utkutugrul/review-boundary/issues/10",
       "owner": "Codex",
       "reviewer": "Claude",
-      "status": "active",
+      "status": "done",
       "dependencies": [],
       "acceptance": [
         "Eight scoped management files pass meaningful checks and independent review.",
@@ -47,7 +44,8 @@ permitted only for future pending tasks.
       "evidence": [
         "Management delivery is implemented in PR19, PR20 and PR21. Final relevant management checks passed155 cases per supported local Python runtime; actual final independent Claude review and exact-head CI passed.",
         "The owner accepted setup and subsequently gave standing authorization for project PR approvals/merges without further permission questions. Root still verifies concrete delivery and exact heads; no self-review or failing-check bypass.",
-        "One existing pinned Symphony coordinator has actually dispatched controlled tasks. CORE11, original CLAUDE13 and its partial-evidence follow-up PR26 are delivered. NATIVE12 is now in a newly promoted Source/inert metadata-correction phase after actual issue13 closure and prior-worker retirement. CORPUS16 remains blocked/off after automatic review refusals. No Native runtime or model-robustness claim follows."
+        "The setup map, pinned GitHub adapter, separate workspaces, concurrency two, role/dependency gates and explicit promotion lifecycle have actual managed dispatch and delivery evidence. PR21 includes supported-runtime 155-case controls and completed independent final-source review; PR27 reconciled delivered reviewer state. Setup acceptance is complete, while Root closes actual issue10 only after this reconciliation is delivered.",
+        "manual_claims retains10 as reserved Root operator custody, not unfinished setup or a claim that the full project is complete. Root continues orchestration and concrete Source/runtime/delivery decisions; corpus16 remains blocked/off and downstream milestones retain their dependencies."
       ]
     },
     {
@@ -94,9 +92,11 @@ permitted only for future pending tasks.
       "evidence": [
         "All original 63 changed native paths match the preserved snapshot. Six workflow modules/tests belong to CORE11; the README description is already delivered in main. Exactly 56 native candidates remain.",
         "Before PR21, the GH12 workspace held the56inputs only as ignored data. PR21 accepted custody; subsequent managed Source corrections were frozen for operator review, without full native or SDK runtime acceptance.",
-        "The separately frozen native operator remains NOT_READY_FOR_RUNTIME after partial independent review. Known Source corrections and all 50 selected runtime controls remain open.",
-        "The child-program context can reproduce all original 790743 JSON bytes from bounded quoted Source without omitting any of the 38 programs. This is reconstruction, not semantic review or execution.",
-        "PR21 delivered custody at main1a59b54. The initial promotion verified the accepted56-file staging and then-closed13 dependency. After the reopened reviewer follow-up landed as PR26/main d555890ba56783a60fe3c901bba88af7c49a7bbf and actual issue13 closed, Root verified prior delivery-worker retirement and explicitly promoted the next same12 Source/inert metadata-correction lease. Root recorded the historical managed-start observation in the issue and local worklog. Transient worker identities are not versioned lease evidence; every future action still requires fresh actual state and no Native50, SDK, observation/generator or other runtime authority follows."
+        "The old hard-bound private operator remains unadopted. Subsequent corrected Source and current packets received separate bounded Root decisions; historical custody or a Source lease never grants runtime authority.",
+        "The historical child-program context reproduces all original 790743 JSON bytes from quoted Source without omitting any of 38 programs. Reconstruction is separate from semantic review and actual execution.",
+        "PR21 delivered custody at main1a59b54. After reviewer follow-up PR26/main d555890ba56783a60fe3c901bba88af7c49a7bbf and actual issue13 closure, Root verified prior-worker retirement and explicitly promoted later same12 Source phases. Each future promotion still requires fresh actual state; transient worker identities are not versioned lease evidence.",
+        "Native50 SCOPED acceptance is complete: 12 preserved unchanged parent controls retain product90bee/privatefd8 bindings, while 38 new real-child controls ran at product200a32f8291f502a4778cd4818919bc73d70ff3f/private9c858f224eaaa434a932bea2e5b1f4599e741753 on Python 3.11.15/3.14.3. The new cases comprise 34 expected refusals and 4 owned-thread positives, each with an independently verified receipt, consumed one-use decision and zero held owners. Earlier failures and original result identities remain preserved; unchanged parents were not rerun or relabeled.",
+        "The current managed phase prepares SDK231 Source only: 107 fixed workers plus 124 parent/driver cases, with current startup/import/effect/cache and receipt contracts for Root review. These are selected declarations, not SDK passes. Native50 is harness evidence, not model evidence or whole12 completion; broader SDK, provider, host/VM, CLI/UI, integration and delivery acceptance remains open."
       ]
     },
     {
@@ -155,7 +155,7 @@ permitted only for future pending tasks.
       "issue": "https://github.com/utkutugrul/review-boundary/issues/28",
       "owner": "Codex",
       "reviewer": "Claude",
-      "status": "backlog",
+      "status": "done",
       "dependencies": [
         "core-11",
         "claude-13"
@@ -173,7 +173,11 @@ permitted only for future pending tasks.
         "Verify the exact changed-file roster is limited to the four allowed new paths/patterns, has no overlap with Native56 custody, and introduces no native/SDK/provider/process execution dependency.",
         "Record scoped checks and genuine independent Claude review of the frozen final source; preserve partial or unavailable review outcomes without claiming approval or execution evidence."
       ],
-      "evidence": []
+      "evidence": [
+        "Delivered by PR30 as main38d685617e04801758af9a0fdfbb658cf9acf469, tree739bb7163867ba341a61f89ac7aa78e38151d29c exactly matching reviewed head3c3e63bccf80c66afd6664151498b5fd10773f37. Actual issue28 is closed. Exactly five new files preserve all 269 existing tracked blobs/modes and Native56 custody.",
+        "Final 183 report tests passed each Python 3.11.15/3.14.3; four counter-consistency regressions failed before the fix and passed afterward. Both scripted fixtures regenerate through unchanged CORE11. Exact-head CI passed 4372 Python tests and 94 subtests per runtime plus lint, formatting, package, browser, calibration, preview and CodeQL checks; conditional publisher skips remain recorded.",
+        "Genuine ordinary Claude implementation review completed 45.511559 seconds over seven production code/context paths, key42b7ed49534609725783705d4e229f897ac03e715a36c150e5304996a1f7938b, zero denials and six groups retired with both EOFs and scratch removed. Root's actual unchanged CORE11 output disproved its P3 completion/repository-review equivalence premise; legitimate rows remain preserved. Tests, data and docs have separate Codex/Root inspection and actual validation. Every earlier partial review remains unavailable, not approval. This standalone contract does not complete PROCESS14 or REPORTS15."
+      ]
     },
     {
       "id": "reports-15",
@@ -273,25 +277,21 @@ worker rechecks remain required. Claude-led work needs the real CLI bridge;
 a role label alone cannot supply it. Current dirty worktrees stay excluded until
 explicit ownership handoff.
 
-Next: finish the current Native12 Source corrections and independent review
-before a bounded technical execution decision. Every promotion still rechecks
-the actual closed reviewer13 dependency and fresh matching claim; this delivery
-record alone never dispatches or authorizes runtime execution.
-Corpus16 dispatch stays off pending a relevant
-external review-state change; its scope and acceptance criteria are unchanged.
-Core11 is delivered, while14/15/17/18 retain their existing dependencies.
-REPORTS15 also requires the standalone workflow report contract. Task28 is bound
-to its actual issue and still requires explicit operator promotion. Its scope
-allows preparation in new files alongside Native12 without adopting Native
-inputs or implementing downstream integration. Recheck
-each task's actual role, dependency record and accepted inputs before promotion.
+Next: finish the Native12 SDK231 Source packet and independent review before
+Root admits any collection or runtime case. Native50 acceptance grants no SDK
+or model result. Future promotions still recheck actual dependencies and a fresh
+matching claim. Corpus16 stays off pending a relevant external-state change.
+CORE11 and report contract28 are delivered;14/15/17/18 retain their dependencies,
+including REPORTS15 on PROCESS14 and delivered28. Root continues orchestration
+and verification while these milestones remain open. Recheck each task's roles,
+dependencies and accepted inputs before promotion.
 No old native private operator is automatically adopted or executed. See [plan rules](../../PLANS.md) and
 [operations](../../symphony-operations.md).
 
 Migration: new implementation/research goes through Symphony/GitHub, with one
-writer per issue/scope. Accepted PR21 landing released completed manual claims11 and12. Claim10
-remains held while the operator finishes management work. A plan
-status coordinates open work; a terminal done record must be explicitly reopened
+writer per issue/scope. PR21 released completed manual claims11 and12. Claim10
+remains reserved for Root operator custody until explicit handoff, independently
+of the delivered setup milestone. A terminal done record must be explicitly reopened
 in the versioned plan. Neither status grants a runtime claim or dispatch authority.
 Actual operating/review evidence is recorded in issues10/13; offline checks do
 not establish a live claim, model result or native execution authority.
