@@ -101,7 +101,8 @@ terminal outcomes and tombstones. An ambiguous actual finish instead downgrades
 its newly written terminal state to unknown. Errors before and after commit take
 the same recovery path. Interruption attempts recovery, then propagates.
 
-If storage also refuses recovery, the unknown marker may not persist. The prior
+Recovery attempts rollback on every exit, including interruption. If storage
+refuses recovery or recovery is interrupted, the unknown marker may not persist. The prior
 row could still be pending, leased or complete. Close the quarantined connection
 and quarantine the database path at the operator/integration boundary until
 reconciled. Automatic reopen/retry is not reconciliation. The API cannot promise
@@ -157,8 +158,8 @@ These are local database observations, not power-loss durability, worker
 retirement, process-cleanup proof, model robustness or full service readiness.
 Independent Source review and exact-head CI remain separate delivery evidence.
 
-Pre-review local observations: 38 store methods and 165 existing management
-cases passed on each Python 3.11.15/3.14.3 (203 each). Disabled plugin autoload
+Pre-review local observations: 39 store methods and 165 existing management
+cases passed on each Python 3.11.15/3.14.3 (204 each). Disabled plugin autoload
 leaves the existing `asyncio_mode` configuration warning. Scoped Ruff lint,
 formatting, whitespace and management contracts passed. A local Hatchling wheel
 contains byte-identical module source; wheel-imported SQLite close/reopen and
@@ -171,3 +172,5 @@ retained separately; the corrected Source requires its own final review.
 Another confirmed constructor-interruption defect has a regression that failed
 before cleanup was corrected and passed afterward, including a real independent
 SQLite write-lock acquisition after the injected failure.
+An interrupted-recovery regression similarly failed on the earlier source and
+passed after adding unconditional best-effort transaction rollback.

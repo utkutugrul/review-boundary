@@ -853,6 +853,46 @@ class StoreTests(unittest.TestCase):
         with JobStore(self.path) as reopened:
             self.assertEqual(reopened.get(self.request, now_ms=102).state, JobState.UNKNOWN)
 
+    def test_interrupted_recovery_releases_write_lock_and_remains_quarantined(self):
+        real_connect = sqlite3.connect
+
+        class InterruptedRecovery(sqlite3.Connection):
+            fail_during_recovery = False
+
+            def execute(self, sql, parameters=()):
+                if self.fail_during_recovery and sql == "SELECT last_now_ms FROM store_meta":
+                    self.fail_during_recovery = False
+                    raise KeyboardInterrupt
+                return super().execute(sql, parameters)
+
+        def connect(*args, **kwargs):
+            return real_connect(*args, factory=InterruptedRecovery, **kwargs)
+
+        with patch("review_boundary.github_service_store.sqlite3.connect", side_effect=connect):
+            store = JobStore(self.path)
+        try:
+            store.enqueue(self.request, now_ms=100)
+            lease = store.claim(self.request, "worker", now_ms=100, lease_ms=100)
+
+            def fail():
+                store._db.fail_during_recovery = True
+                raise sqlite3.OperationalError("synthetic commit interruption")
+
+            with (
+                patch.object(store, "_commit", side_effect=fail),
+                self.assertRaises(KeyboardInterrupt),
+            ):
+                store.finish(lease, JobState.COMPLETE, now_ms=101)
+            self.error("outcome_unknown", store.get, self.request, now_ms=101)
+            with real_connect(self.path, timeout=0) as independent:
+                independent.execute("BEGIN IMMEDIATE")
+                self.assertEqual(
+                    independent.execute("SELECT state FROM jobs").fetchone()[0], "leased"
+                )
+                independent.rollback()
+        finally:
+            store.close()
+
     def test_store_close_is_idempotent_and_public_errors_exclude_input(self):
         self.store.close()
         self.store.close()

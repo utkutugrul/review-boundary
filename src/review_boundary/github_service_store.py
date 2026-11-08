@@ -332,6 +332,8 @@ class JobStore:
                     )
             self._db.commit()
         except (sqlite3.Error, StoreError):
+            pass
+        finally:
             try:
                 self._db.rollback()
             except sqlite3.Error:
