@@ -1,6 +1,6 @@
 # Symphony management and remaining milestones
 
-Status: GH-13 parser follow-up awaits independent review; owner acceptance WAIT.
+Status: GH-13 CLI corrections await final review and CI; owner acceptance WAIT.
 These are the actual [repository issues](https://github.com/utkutugrul/review-boundary/issues).
 Other tasks remain disabled. The previous agents have stopped, but #10/#11/#12 retain
 manual handoff holds until their uncommitted sources are explicitly migrated.
@@ -82,12 +82,14 @@ Null links are permitted only for future pending tasks.
         "Verifies supported flags, disables tools and avoids source writes.",
         "Bounds process lifetime/output and preserves unavailable outcomes and actual cleanup facts.",
         "Binds coverage/findings to revision and scoped content identity for relevant-change reuse.",
-        "Separates coding-account usage from application budgets and excludes credentials from artifacts."
+        "Separates coding-account usage from application budgets and excludes credentials from artifacts.",
+        "Refuses mixed live/offline claim modes before access and preserves deadline diagnostics while redacting invalid JSON details."
       ],
       "validation": [
         "Record scoped actual checks and independent final-source review in the issue/PR."
       ],
       "evidence": [
+        "Current CLI correction: 152 management tests pass on Python 3.11.15 and 3.14.10. New regression controls produced eight failures and four redaction passes against e3a1f6e before production edits. Final independent changed-source review and exact-head CI are recorded on GH-13 and PR20 after this source freeze; prior review/CI remains historical and owner acceptance WAIT.",
         "GH-13 URL refusal follow-up: 140 management tests pass on Python 3.11.15 and 3.14.10; repository Ruff and management checks pass. Whole canonical URL tokens and bare references are consumed before refusing residual reference/URL-like text, including beside None. All original controls remain.",
         "The operator reports completed independent normal-Claude current/base review of 43bbb0486d0a3763a6f15ec4136830a8f04c29b4: seven selected paths, zero denials, nine groups retired, scratch removed and unchanged source. Both CI runs passed for that revision. The helper, its tests and procedure remain byte-identical to that reviewed source and were not rerun. The new parser/test delta still needs independent review and fresh CI; the separate incomplete twelve-file review and earlier unavailable/failure outcomes remain explicit.",
         "See gh-13-worklog.md for scope, observed failures, checks and delivery unknowns; material-risk acceptance remains WAIT."

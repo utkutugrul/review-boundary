@@ -438,6 +438,167 @@ def fetch_fixture(records, requests=None, clock=lambda: 0):
     )
 
 
+@pytest.fixture
+def cli_workspace(tmp_path, monkeypatch):
+    workspace = tmp_path / "GH-14"
+    (workspace / management.PLAN).parent.mkdir(parents=True)
+    (workspace / management.PLAN).write_text((ROOT / management.PLAN).read_text())
+    tasks = registered_tasks()
+    monkeypatch.setattr(management, "check_repo", lambda root: tasks)
+    return workspace
+
+
+@pytest.fixture
+def live_transport(monkeypatch):
+    records = fake_http_records()
+    previous = object()
+    state = {"handler": previous}
+    changes, requests = [], []
+    fake_signal = SimpleNamespace(SIGALRM=1, ITIMER_REAL=2)
+    fake_signal.getitimer = lambda kind: (0.0, 0.0)
+
+    def handler(kind, value):
+        old = state["handler"]
+        state["handler"] = value
+        changes.append(("handler", kind, value))
+        return old
+
+    fake_signal.signal = handler
+    fake_signal.setitimer = lambda kind, seconds: changes.append(("timer", kind, seconds))
+
+    def open_url(request, timeout):
+        number = int(request.full_url.rsplit("/", 1)[1])
+        requests.append(number)
+        return io.BytesIO(json.dumps(records[number]).encode())
+
+    monkeypatch.setattr(management, "signal", fake_signal)
+    monkeypatch.setattr(
+        management, "build_opener", lambda *handlers: SimpleNamespace(open=open_url)
+    )
+    return SimpleNamespace(
+        records=records, state=state, changes=changes, requests=requests, previous=previous
+    )
+
+
+def test_cli_distinguishes_offline_snapshot_from_live_fetch(
+    cli_workspace, live_transport, tmp_path, monkeypatch, capsys
+):
+    value = snapshot()
+    value["observed_at"] = datetime.now(UTC).isoformat()
+    path = tmp_path / "offline-fixture.json"
+    path.write_text(json.dumps(value))
+    monkeypatch.delenv("SYMPHONY_GITHUB_TOKEN", raising=False)
+    args = ["--repo", str(cli_workspace)]
+    assert management.main([*args, "--issue-snapshot", str(path)]) == 0
+    offline = capsys.readouterr()
+    assert "offline snapshot GH-14" in offline.out
+    assert "does not authenticate" in offline.out
+    assert "does not authorize promotion" in offline.out
+    assert not offline.err and not live_transport.requests
+
+    assert management.main([*args, "--require-live-claim"]) == 1
+    missing_auth = capsys.readouterr()
+    assert "explicit SYMPHONY_GITHUB_TOKEN" in missing_auth.err
+    assert not missing_auth.out and not live_transport.requests
+
+    monkeypatch.setenv("SYMPHONY_GITHUB_TOKEN", "fixture-token")
+    assert management.main([*args, "--require-live-claim"]) == 0
+    live = capsys.readouterr()
+    assert "live GitHub fetch GH-14" in live.out
+    assert "does not authorize promotion" in live.out
+    assert "offline snapshot" not in live.out and not live.err
+    assert live_transport.requests == [14, 11, 12]
+    assert live_transport.state["handler"] is live_transport.previous
+
+
+@pytest.mark.parametrize("live_first", [False, True])
+@pytest.mark.parametrize("existing_snapshot", [False, True])
+def test_cli_mixed_modes_are_refused_before_file_auth_or_network_access(
+    cli_workspace, tmp_path, monkeypatch, capsys, live_first, existing_snapshot
+):
+    value = snapshot()
+    value["observed_at"] = datetime.now(UTC).isoformat()
+    path = tmp_path / "offline-fixture.json"
+    path.write_text(json.dumps(value))
+    args = ["--repo", str(cli_workspace)]
+    assert management.main([*args, "--issue-snapshot", str(path)]) == 0
+    capsys.readouterr()
+    if not existing_snapshot:
+        path.unlink()
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("conflicting modes must be refused before any input or auth access")
+
+    monkeypatch.setattr(management, "check_repo", forbidden)
+    monkeypatch.setattr(management, "read_text", forbidden)
+    monkeypatch.setattr(management, "fetch_live_snapshot", forbidden)
+    monkeypatch.setattr(management, "os", SimpleNamespace(environ=SimpleNamespace(get=forbidden)))
+    flags = ["--issue-snapshot", str(path)]
+    flags = ["--require-live-claim", *flags] if live_first else [*flags, "--require-live-claim"]
+    with pytest.raises(SystemExit) as error:
+        management.main([*args, *flags])
+    assert error.value.code == 2
+    output = capsys.readouterr()
+    assert "not allowed with argument" in output.err
+    assert "--issue-snapshot" in output.err and "--require-live-claim" in output.err
+    assert not output.out
+
+
+@pytest.mark.parametrize("interrupted_decode", [1, 2, 3])
+def test_live_decode_deadline_preserves_fixed_diagnostic_and_restores_timer(
+    live_transport, monkeypatch, interrupted_decode
+):
+    value = management.fetch_live_snapshot(14, token="fixture-token", clock=lambda: 0, now=NOW)
+    assert management.check_issue_snapshot(value, now=NOW) == 14
+    original_decode = management.decode_json
+    calls = 0
+
+    def interrupted(text):
+        nonlocal calls
+        calls += 1
+        if calls == interrupted_decode:
+            live_transport.state["handler"](1, None)
+        return original_decode(text)
+
+    monkeypatch.setattr(management, "decode_json", interrupted)
+    with pytest.raises(management.ManagementError) as error:
+        management.fetch_live_snapshot(14, token="fixture-token", clock=lambda: 0, now=NOW)
+    assert str(error.value) == "live GitHub: absolute ten-second deadline exceeded"
+    assert calls == interrupted_decode
+    assert live_transport.changes[-2:] == [
+        ("timer", 2, 0),
+        ("handler", 1, live_transport.previous),
+    ]
+    assert live_transport.state["handler"] is live_transport.previous
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        b'{"untrusted-response":',
+        b'{"untrusted-duplicate":1,"untrusted-duplicate":2}',
+        b'{"untrusted-nonfinite":NaN}',
+        b'{"untrusted-encoding":"\xff"}',
+    ],
+)
+def test_live_invalid_json_keeps_duplicate_keys_and_response_contents_redacted(raw):
+    value = fetch_fixture(fake_http_records())
+    assert management.check_issue_snapshot(value, now=NOW) == 14
+    requests = []
+
+    def open_url(request, timeout):
+        requests.append(request.full_url)
+        return io.BytesIO(raw)
+
+    with pytest.raises(management.ManagementError) as error:
+        management.fetch_live_snapshot(
+            14, token="fixture-token", open_url=open_url, clock=lambda: 0, now=NOW
+        )
+    assert str(error.value) == "live GitHub: invalid JSON response; details omitted"
+    assert error.value.__suppress_context__
+    assert requests == [f"https://api.github.com/repos/{management.REPOSITORY}/issues/14"]
+
+
 def test_live_gate_uses_fixed_get_ids_and_explicit_credential_without_network():
     requests = []
     value = fetch_fixture(fake_http_records(), requests)

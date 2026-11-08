@@ -1,8 +1,8 @@
 # GH-13 worklog
 
 Scope: ordinary Claude CLI helper, contract tests, English procedure and GH-13
-plan evidence. The operator explicitly extends this continuation only to the
-minimal issue dependency parser correction and its existing test module.
+plan evidence. The current continuation corrects only the management CLI's mixed
+live/offline flags and deadline diagnostic, their tests and operations guidance.
 Codex implements; real Claude reviews. Human owner: utkutugrul.
 No other task ownership, workflow configuration or authentication changes.
 
@@ -168,3 +168,53 @@ No merge, gated approval/HOLD, other-task promotion, application provider run,
 credential-file access, install, daemon start, native operator execution,
 authentication or permission change. Ordinary coding-account usage remains
 separate from the USD20 application benchmark cap.
+
+## Management CLI correction
+
+- Actual host github_api observation at 2026-11-08T06:17:37Z: GH-13 open,
+  assigned to utkutugrul, with symphony, status:active and dispatch:enabled.
+  All six headings, distinct Codex/Claude roles and no dependencies matched the
+  plan. The bounded actual-response snapshot passed before source changes.
+- PR #20 remained open at e3a1f6e4955a5925bc8ba4c62c26f6585de38e9b on
+  codex/gh-13-independent-claude-review. All eight existing delivery files matched
+  that remote revision byte for byte. The original dirty/untracked workspace
+  was preserved; an isolated validation clone continues the same issue branch.
+  Only the checker, its tests, operations guide and these two evidence files
+  change. Manual claims 10/11/12 and all other task records remain unchanged.
+- Mixed --issue-snapshot/--require-live-claim now fails in argument parsing,
+  before source/snapshot reads, authentication or transport. Separate successful
+  outputs identify offline snapshot validation or a live GitHub fetch. Both
+  retain explicit operator promotion; plan status remains coordination metadata.
+- A specific ManagementError subtype preserves the fixed absolute deadline
+  refusal through JSON decoding. Other ValueError/UnicodeError cases still
+  suppress response details, duplicate keys and exception context.
+- Before production edits, the 12 new regression cases against e3a1f6e produced
+  eight failures and four passes, with 140 deselected. Both flag orders and
+  existing/missing snapshot files failed; injected expiry during the current
+  issue and both dependency decodes lost its diagnostic. Four malformed JSON,
+  duplicate-key, nonfinite and invalid-encoding controls already kept redaction.
+  No real signals, transport, credential or model calls were used in these tests.
+- All 152 management tests pass on actual Python 3.11.15 and 3.14.10. Installed
+  pytest 8.4.2 was reused without installation, with plugin autoload and cache
+  disabled; each run reported one unknown asyncio_mode configuration warning.
+  Ruff lint passed; its initial format check requested three wrapped print
+  calls, which were corrected. Final lint/format, management contracts and
+  whitespace are checked before the correction is committed.
+- The helper, helper tests and procedure are unchanged. Executed helper bytes
+  must match the committed helper, whose SHA-256 remains
+  f64a4e4aaa7884728ab0901b7856589f4cc89636e08fc70766e65bbed843b1b2.
+  Prior completed helper reviews retain their original revisions. The earlier
+  e3a1f6e CI (3936 tests plus 63 subtests per Python version and 78 browser tests)
+  and the operator's private integration rehearsal are historical evidence,
+  not review or CI of this correction. The e3a1f6e owner question is superseded.
+- Freeze these five changed files with e3a1f6e as the comparison base for the
+  installed ordinary Claude helper. This commit precedes its real final review
+  and exact-head CI; actual availability, findings/triage, source/key bindings,
+  process/scratch cleanup and CI outcomes will be recorded in GH-13 and PR #20
+  against that immutable revision. A missing account or uncertain cleanup is
+  unavailable, never a pass. No unchanged helper model scope is repeated.
+- After successful correction checks, independent review and push, hand off
+  with status:review and dispatch removed. Root must verify the exact new head
+  before a new owner decision. Material-risk acceptance remains WAIT; no merge,
+  approval/HOLD, auth change, provider-budget use or native operator execution.
+  The operator maintains canonical work_state outside this child.

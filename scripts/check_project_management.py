@@ -46,6 +46,10 @@ class ManagementError(ValueError):
     """An actionable contract refusal without dumping supplied task bodies."""
 
 
+class LiveDeadlineExceeded(ManagementError):
+    """Keep the fixed deadline refusal distinct from untrusted JSON errors."""
+
+
 def require(condition, message):
     if not condition:
         raise ManagementError(message)
@@ -486,7 +490,7 @@ def _live_deadline(enabled):
     )
 
     def expired(_signum, _frame):
-        raise ManagementError("live GitHub: absolute ten-second deadline exceeded")
+        raise LiveDeadlineExceeded("live GitHub: absolute ten-second deadline exceeded")
 
     try:
         previous = signal.signal(signal.SIGALRM, expired)
@@ -552,6 +556,8 @@ def fetch_live_snapshot(number, *, token, open_url=None, clock=time.monotonic, n
             require(clock() - began <= 10, "live GitHub: aggregate deadline exceeded")
             try:
                 value = decode_json(raw.decode("utf-8"))
+            except LiveDeadlineExceeded:
+                raise
             except (ValueError, UnicodeError):
                 raise ManagementError(
                     "live GitHub: invalid JSON response; details omitted"
@@ -597,8 +603,9 @@ def fetch_live_snapshot(number, *, token, open_url=None, clock=time.monotonic, n
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", type=Path, default=Path.cwd())
-    parser.add_argument("--issue-snapshot", type=Path)
-    parser.add_argument("--require-live-claim", action="store_true")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--issue-snapshot", type=Path)
+    mode.add_argument("--require-live-claim", action="store_true")
     args = parser.parse_args(argv)
     try:
         tasks = check_repo(args.repo)
@@ -626,8 +633,18 @@ def main(argv=None):
             number = check_live_claim(
                 data, expected_issue=expected_issue, manual_claims=claims, tasks=tasks
             )
-            print(f"Repository contracts OK; supplied GH-{number} data passes live-claim checks.")
-            print("This does not authenticate GitHub data or authorize promotion.")
+            if args.issue_snapshot:
+                print(f"Repository contracts OK; offline snapshot GH-{number} passes claim checks.")
+                print(
+                    "File-supplied data does not authenticate GitHub data or its observation time."
+                )
+            else:
+                print(
+                    f"Repository contracts OK; live GitHub fetch GH-{number} passes claim checks."
+                )
+            print(
+                "Validation does not authorize promotion; explicit operator dispatch is required."
+            )
         else:
             print(f"Repository contracts OK ({len(tasks)} tasks); dispatch NOT checked.")
         return 0
