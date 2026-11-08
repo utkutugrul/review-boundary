@@ -17,6 +17,25 @@ SPEC = importlib.util.spec_from_file_location(
 management = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(management)
 NOW = datetime(2026, 11, 7, 20, tzinfo=UTC)
+UNSUPPORTED_DEPENDENCY_URLS = (
+    "http://github.com/other/repo/issues/5",
+    "github.com/other/repo/issues/5",
+    "HTTPS://github.com/other/repo/issues/5",
+    "https://github.com/other/repo/pull/5",
+    f"http://github.com/{management.REPOSITORY}/issues/11",
+    f"github.com/{management.REPOSITORY}/issues/11",
+    f"HTTPS://github.com/{management.REPOSITORY}/issues/11",
+    f"https://github.com/{management.REPOSITORY}/pull/11",
+    "https://github.com/other/repo/issues/5",
+    f"https://GITHUB.COM/{management.REPOSITORY}/issues/11",
+    f"prefix{management.ISSUE_URL}11",
+    f"{management.ISSUE_URL}0",
+    f"{management.ISSUE_URL}011",
+    *(
+        f"{management.ISSUE_URL}11{suffix}"
+        for suffix in ("/extra", "?x=1", "#5", "bad", ".5", ",bad")
+    ),
+)
 
 
 def registered_tasks():
@@ -242,6 +261,10 @@ def test_none_cannot_hide_a_real_dependency():
         "#11 and #12",
         f"{management.ISSUE_URL}11 and {management.ISSUE_URL}12",
         f"[Core]({management.ISSUE_URL}11) and #12",
+        f"[Core]({management.ISSUE_URL}11) and [Native]({management.ISSUE_URL}12)",
+        f"<{management.ISSUE_URL}11> and <{management.ISSUE_URL}12>",
+        f"- {management.ISSUE_URL}11\n- {management.ISSUE_URL}12",
+        "#11, #12.",
     ],
 )
 def test_supported_dependency_references_keep_exact_plan_binding(references):
@@ -295,6 +318,46 @@ def test_live_fetch_refuses_unsupported_dependencies_before_any_dependency_reque
     requests.clear()
     with pytest.raises(management.ManagementError, match="unsupported issue-reference"):
         fetch_fixture(records, requests)
+    assert [request[0] for request in requests] == [
+        f"https://api.github.com/repos/{management.REPOSITORY}/issues/14"
+    ]
+
+
+@pytest.mark.parametrize("unsupported", UNSUPPORTED_DEPENDENCY_URLS)
+@pytest.mark.parametrize("context", ["alone", "supported", "none"])
+def test_unsupported_dependency_urls_are_refused_as_whole_tokens(unsupported, context):
+    records = fake_http_records()
+    prefix = "None." if context == "none" else "#11 and #12"
+    records[14]["body"] = records[14]["body"].replace("#11 and #12", prefix)
+    requests = []
+    value = fetch_fixture(records, requests)
+    assert management.check_issue_snapshot(value, now=NOW) == 14
+    owners, dependencies = management.issue_contract(value["issue"]["body"])
+    assert owners == {"owner": "Codex", "reviewer": "Claude"}
+    assert dependencies == (set() if context == "none" else {11, 12})
+    if context != "none":
+        assert (
+            management.check_live_claim(
+                value, tasks=registered_tasks(), expected_issue=14, manual_claims=[], now=NOW
+            )
+            == 14
+        )
+
+    changed = unsupported if context == "alone" else f"{prefix} {unsupported}"
+    records[14]["body"] = records[14]["body"].replace(prefix, changed)
+    message = (
+        "issue Dependencies: unsupported issue-reference form; use bare #N or canonical issue URLs"
+    )
+    # The snapshot and the real fetch path must refuse before asking for any
+    # dependency, even when a supported prefix or None would otherwise pass.
+    value["issue"]["body"] = records[14]["body"]
+    with pytest.raises(management.ManagementError) as caught:
+        management.check_issue_snapshot(value, now=NOW)
+    assert str(caught.value) == message
+    requests.clear()
+    with pytest.raises(management.ManagementError) as caught:
+        fetch_fixture(records, requests)
+    assert str(caught.value) == message
     assert [request[0] for request in requests] == [
         f"https://api.github.com/repos/{management.REPOSITORY}/issues/14"
     ]

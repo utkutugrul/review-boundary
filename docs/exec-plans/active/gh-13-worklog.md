@@ -87,7 +87,49 @@ Ruff checks. Completion is not approval, final-source coverage or model robustne
   This is previous-source evidence. Fresh CI for the new revision must be
   observed separately; local counts do not establish a full-suite or model pass.
 
+## URL refusal follow-up
+
+- Actual host github_api observation at 2026-11-08T05:15:28Z: GH-13 open,
+  assigned to utkutugrul, with symphony, status:ready and dispatch:enabled;
+  distinct Codex/Claude roles and no dependencies match the plan. The bounded
+  actual-response snapshot passed the checker before source changes.
+- Continue the same branch and standard PR #20 from
+  43bbb0486d0a3763a6f15ec4136830a8f04c29b4. All eight delivery files
+  initially matched its Git blobs. Only the parser, existing management tests,
+  this worklog and GH-13 plan evidence change in this continuation.
+- The operator reports that revision's seven-file current/base real review
+  completed in 65.894 seconds with full selected coverage, zero denials,
+  all nine supervised groups retired, scratch removed and unchanged source.
+  Its PR CI 42449462722 and branch CI 42449459502 now report success.
+  These remain evidence for that original revision, not the new parser.
+- The remaining P3 URL finding is corrected: consume whole canonical
+  same-repository HTTPS issue URL tokens and bare ASCII #N references, then
+  refuse residual reference/URL-like text. Foreign, HTTP, schemeless, uppercase,
+  pull, prefixed and malformed-suffix URLs fail with a fixed non-secret message.
+  No host/protocol, authentication, network or ownership expansion occurs.
+- Paired controls cover 19 unsupported URLs alone, beside supported references
+  and beside None. Both the supplied-snapshot and fake-HTTP paths refuse;
+  the latter makes only the current-issue request. Positive controls preserve
+  genuine explanatory None, Markdown/bare canonical URLs, exact roles and
+  registered dependencies. All original short-reference and gate controls stay.
+- Before production edits, the regression selection reported 54 failures,
+  10 passes and 76 deselected. Some malformed forms already refused, while
+  others were dropped or consumed by prefix; all must use the bounded refusal.
+- Final focused runs each pass 140 management tests on Python 3.11.15 and
+  3.14.10. Existing pytest was reused via sys.path with plugin autoload and
+  cache disabled; each run has one unknown asyncio_mode warning. No install.
+  Repository-wide Ruff lint/format, management contracts and whitespace pass.
+- scripts/claude_review.py, tests/test_claude_review.py and the procedure remain
+  byte-identical to 43bbb0486d0a3763a6f15ec4136830a8f04c29b4. The helper
+  SHA-256 remains f64a4e4aaa7884728ab0901b7856589f4cc89636e08fc70766e65bbed843b1b2.
+  No unchanged helper test/model scope was rerun. Reuse retains the operator's
+  original reviewed revision and exact content identity, not a rewritten review.
+
 ## Preserved failure history
+
+- The operator's separate twelve-file current-only review of 43bbb0486d0a3763a6f15ec4136830a8f04c29b4
+  returned incomplete_review. It remains unavailable, not a pass or a substitute
+  for the completed seven-file current/base review.
 
 - Older e3f52d044afb0cfe75eaa9d31c9a56373c6b0e8f Linux jobs failed the stdin
   test's pipe-capacity assumption, with 3839 other tests and 51 subtests passed
@@ -109,14 +151,15 @@ Ruff checks. Completion is not approval, final-source coverage or model robustne
 
 ## Frozen handoff
 
-The issue and PR record the exact new revision/tree, scoped source hashes,
-review key, validation and operator command. This worklog is part of that
-immutable source. The final seven-path review includes every changed path from
-2623cc3e43c696cefa12cfe5b646d5c2efd66540 with the original comparison base.
-The unchanged operations link was already in the previous reviewed source.
-Keep current/base payload within 192 KiB; describe-only launches no Claude.
+The issue and PR record the exact new revision/tree, four changed paths,
+source hashes, validation and operator command. This worklog is part of that
+immutable source. Independent follow-up review uses
+43bbb0486d0a3763a6f15ec4136830a8f04c29b4 as its comparison base and includes
+the parser/tests and changed plan/worklog evidence. Keep current/base payload
+within 192 KiB; describe-only launches no Claude. Existing completed helper
+evidence is reused only by exact identity and retains its reviewed revision.
 
-Keep GH-13 open in status:review with dispatch disabled for final-source review.
+Keep GH-13 open in status:review with dispatch disabled for independent delta review.
 Require structured source/key binding, full selected coverage, zero permission
 denials, confirmed cleanup and unchanged source. Independently assess lifetime,
 source binding and refusal. Existing authorization remains valid within scope.

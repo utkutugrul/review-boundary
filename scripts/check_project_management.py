@@ -321,18 +321,23 @@ def issue_contract(body):
         "issue Acceptance criteria: add a concrete checklist",
     )
     text = sections["Dependencies"]
-    urls = re.findall(r"https://github\.com/[^/\s)]+/[^/\s)]+/issues/\d+", text)
-    require(
-        all(url.startswith(ISSUE_URL) for url in urls),
-        "issue Dependencies: only this repository is supported",
+    # Whitespace and Markdown wrappers delimit whole URL tokens. A canonical
+    # prefix cannot authorize a URL with a suffix, query or fragment.
+    url_token = r"(?<![^\s<>()\[\]])https://[^\s<>()\[\]]+"
+    urls = re.findall(url_token, text)
+    message = (
+        "issue Dependencies: unsupported issue-reference form; use bare #N or canonical issue URLs"
     )
+    require(all(re.fullmatch(re.escape(ISSUE_URL) + r"[1-9][0-9]*", url) for url in urls), message)
     dependencies = {issue_number(url) for url in urls}
-    bare_reference = r"(?<![\w/.-])#([1-9]\d*)\b"
+    remaining = re.sub(url_token, "", text)
+    bare_reference = r"(?<![\w/.-])#([1-9][0-9]*)(?=$|[\s,\])>]|\.(?:\s|$))"
+    dependencies.update(int(n) for n in re.findall(bare_reference, remaining))
+    remaining = re.sub(bare_reference, "", remaining)
     require(
-        not re.search(r"#\d|\bGH-\d+\b", re.sub(bare_reference, "", text), re.IGNORECASE),
-        "issue Dependencies: unsupported issue-reference form; use bare #N or canonical issue URLs",
+        not re.search(r"#|\bGH-[0-9]|[/\\:]|\b[\w-]+\.[\w-]", remaining, re.IGNORECASE),
+        message,
     )
-    dependencies.update(int(n) for n in re.findall(bare_reference, text))
     require(
         dependencies or re.match(r"^None(?:[.\s]|$)", text, re.IGNORECASE),
         "issue Dependencies: use None or explicit same-repository issue references",

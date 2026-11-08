@@ -1,6 +1,6 @@
 # Symphony management and remaining milestones
 
-Status: GH-13 ordinary CLI helper available; real Claude review blocks delivery.
+Status: GH-13 parser follow-up awaits independent review; owner acceptance WAIT.
 These are the actual [repository issues](https://github.com/utkutugrul/review-boundary/issues).
 Other tasks remain disabled. The previous agents have stopped, but #10/#11/#12 retain
 manual handoff holds until their uncommitted sources are explicitly migrated.
@@ -88,8 +88,8 @@ Null links are permitted only for future pending tasks.
         "Record scoped actual checks and independent final-source review in the issue/PR."
       ],
       "evidence": [
-        "GH-13 final follow-up: 27 helper tests plus 79 management cases pass on Python 3.11.15 and 3.14.10. Literal-LF citation bounds and unsupported dependency-reference refusal are corrected within the explicitly extended scope; all original controls remain.",
-        "The operator reports completed independent normal-Claude review of 2623cc3e43c696cefa12cfe5b646d5c2efd66540: eleven selected paths, zero permission denials, confirmed cleanup and unchanged source. All four finding dispositions are in the worklog. Final-source real review and fresh CI remain outstanding; prior failed/unavailable attempts stay explicit.",
+        "GH-13 URL refusal follow-up: 140 management tests pass on Python 3.11.15 and 3.14.10; repository Ruff and management checks pass. Whole canonical URL tokens and bare references are consumed before refusing residual reference/URL-like text, including beside None. All original controls remain.",
+        "The operator reports completed independent normal-Claude current/base review of 43bbb0486d0a3763a6f15ec4136830a8f04c29b4: seven selected paths, zero denials, nine groups retired, scratch removed and unchanged source. Both CI runs passed for that revision. The helper, its tests and procedure remain byte-identical to that reviewed source and were not rerun. The new parser/test delta still needs independent review and fresh CI; the separate incomplete twelve-file review and earlier unavailable/failure outcomes remain explicit.",
         "See gh-13-worklog.md for scope, observed failures, checks and delivery unknowns; material-risk acceptance remains WAIT."
       ]
     },
