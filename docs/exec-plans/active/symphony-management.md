@@ -41,7 +41,7 @@ permitted only for future pending tasks.
       "evidence": [
         "Management delivery is implemented in PR19, PR20 and PR21. Final relevant management checks passed155 cases per supported local Python runtime; actual final independent Claude review and exact-head CI passed.",
         "The owner accepted setup and subsequently gave standing authorization for project PR approvals/merges without further permission questions. Root still verifies concrete delivery and exact heads; no self-review or failing-check bypass.",
-        "One existing pinned Symphony coordinator has actually dispatched and run controlled GitHub tasks. CORE11 and CLAUDE13 are delivered; NATIVE12 remains Source-only and CORPUS16 is explicitly promoted. No native runtime or model-robustness claim is inferred."
+        "One existing pinned Symphony coordinator has actually dispatched and run controlled GitHub tasks. CORE11 and CLAUDE13 are delivered; NATIVE12 remains Source-only. CORPUS16 was promoted and is now blocked with dispatch removed after automatic review refusals. No native runtime or model-robustness claim is inferred."
       ]
     },
     {
