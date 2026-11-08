@@ -231,7 +231,8 @@ adopted or executed. See [plan rules](../../PLANS.md) and
 Migration: new implementation/research goes through Symphony/GitHub, with one
 writer per issue/scope. Accepted landing releases only completed manual claims11
 and12. Claim10 remains held while the operator finishes management work. A plan
-status is coordination metadata, not a runtime claim or dispatch authorization.
+status coordinates open work; a terminal done record must be explicitly reopened
+in the versioned plan. Neither status grants a runtime claim or dispatch authority.
 Actual operating/review evidence is recorded in issues10/13; offline checks do
 not establish a live claim, model result or native execution authority.
 

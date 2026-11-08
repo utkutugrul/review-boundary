@@ -450,6 +450,10 @@ def check_live_claim(value, *, expected_issue, manual_claims, tasks, now=None):
     registered = {issue_number(task["issue"]): task for task in tasks if task["issue"] is not None}
     require(number in registered, "live claim: issue is not registered in the active plan")
     task = registered[number]
+    require(
+        task["status"] != "done",
+        "live claim: completed plan task requires explicit plan reopening",
+    )
     owners, dependencies = issue_contract(value["issue"]["body"])
     require(
         owners == {field: task[field] for field in ("owner", "reviewer")},

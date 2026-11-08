@@ -211,7 +211,7 @@ def test_blocked_with_dispatch_is_refused_even_with_closed_dependencies():
 
 
 @pytest.mark.parametrize("terminal_state", ["closed_issue", "done_label"])
-def test_completed_plan_records_do_not_admit_terminal_live_claims(terminal_state):
+def test_other_completed_records_do_not_change_live_terminal_refusal(terminal_state):
     tasks = registered_tasks()
     tasks[0]["status"] = "done"
     management.check_tasks(tasks)
@@ -234,6 +234,31 @@ def test_completed_plan_records_do_not_admit_terminal_live_claims(terminal_state
         management.check_live_claim(
             value, expected_issue=14, manual_claims=[], tasks=tasks, now=NOW
         )
+
+
+def test_reopened_live_issue_cannot_dispatch_completed_registered_task():
+    tasks = registered_tasks()
+    value = snapshot()
+    assert (
+        management.check_live_claim(
+            value, expected_issue=14, manual_claims=[], tasks=tasks, now=NOW
+        )
+        == 14
+    )
+    registered = next(task for task in tasks if task["id"] == "process-14")
+    registered["status"] = "done"
+    management.check_tasks(tasks)
+    with pytest.raises(management.ManagementError, match="completed plan task"):
+        management.check_live_claim(
+            value, expected_issue=14, manual_claims=[], tasks=tasks, now=NOW
+        )
+    registered["status"] = "ready"
+    assert (
+        management.check_live_claim(
+            value, expected_issue=14, manual_claims=[], tasks=tasks, now=NOW
+        )
+        == 14
+    )
 
 
 def test_unknown_cost_or_model_claim_is_not_added_by_checker(capsys):
