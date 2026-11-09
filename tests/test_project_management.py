@@ -64,14 +64,14 @@ def snapshot():
             ],
             "body": (
                 "## Goal\nImplement a scoped change.\n## Ownership\n"
-                "Implementation lead: Codex\nIndependent reviewer: Claude\n## Dependencies\n#11 and #12\n"
+                "Implementation lead: Codex\nIndependent reviewer: Claude\n## Dependencies\n#11, #12 and #48\n"
                 "## Acceptance criteria\n- [ ] Preserve two fresh sessions.\n"
                 "## Validation\nRun the scoped checks.\n## Delivery\nA reviewable PR.\n"
             ),
         },
         "dependencies": [
             {"number": n, "html_url": management.ISSUE_URL + str(n), "state": "closed"}
-            for n in (11, 12)
+            for n in (11, 12, 48)
         ],
     }
 
@@ -293,7 +293,7 @@ def test_none_dependencies_with_actual_explanatory_sentence_are_supported():
     value = snapshot()
     management.check_issue_snapshot(value, now=NOW)
     value["issue"]["body"] = value["issue"]["body"].replace(
-        "#11 and #12", "None. Existing work may continue in its current isolated workspace."
+        "#11, #12 and #48", "None. Existing work may continue in its current isolated workspace."
     )
     value["dependencies"] = []
     assert management.check_issue_snapshot(value, now=NOW) == 14
@@ -301,7 +301,7 @@ def test_none_dependencies_with_actual_explanatory_sentence_are_supported():
 
 def test_none_cannot_hide_a_real_dependency():
     value = snapshot()
-    value["issue"]["body"] = value["issue"]["body"].replace("#11 and #12", "None. See #11.")
+    value["issue"]["body"] = value["issue"]["body"].replace("#11, #12 and #48", "None. See #11.")
     with pytest.raises(management.ManagementError, match="conflicts"):
         management.check_issue_snapshot(value, now=NOW)
 
@@ -309,21 +309,21 @@ def test_none_cannot_hide_a_real_dependency():
 @pytest.mark.parametrize(
     "references",
     [
-        "#11 and #12",
-        f"{management.ISSUE_URL}11 and {management.ISSUE_URL}12",
-        f"[Core]({management.ISSUE_URL}11) and #12",
-        f"[Core]({management.ISSUE_URL}11) and [Native]({management.ISSUE_URL}12)",
-        f"<{management.ISSUE_URL}11> and <{management.ISSUE_URL}12>",
-        f"- {management.ISSUE_URL}11\n- {management.ISSUE_URL}12",
-        "#11, #12.",
+        "#11, #12 and #48",
+        f"{management.ISSUE_URL}11 and {management.ISSUE_URL}12 and {management.ISSUE_URL}48",
+        f"[Core]({management.ISSUE_URL}11), #12 and #48",
+        f"[Core]({management.ISSUE_URL}11), [Native]({management.ISSUE_URL}12) and #48",
+        f"<{management.ISSUE_URL}11>, <{management.ISSUE_URL}12> and #48",
+        f"- {management.ISSUE_URL}11\n- {management.ISSUE_URL}12\n- {management.ISSUE_URL}48",
+        "#11, #12 and #48.",
     ],
 )
 def test_supported_dependency_references_keep_exact_plan_binding(references):
     value = snapshot()
-    value["issue"]["body"] = value["issue"]["body"].replace("#11 and #12", references)
+    value["issue"]["body"] = value["issue"]["body"].replace("#11, #12 and #48", references)
     owners, dependencies = management.issue_contract(value["issue"]["body"])
     assert owners == {"owner": "Codex", "reviewer": "Claude"}
-    assert dependencies == {11, 12}
+    assert dependencies == {11, 12, 48}
     assert (
         management.check_live_claim(
             value, tasks=registered_tasks(), expected_issue=14, manual_claims=[], now=NOW
@@ -346,14 +346,14 @@ def test_supported_dependency_references_keep_exact_plan_binding(references):
         "#05",
     ],
 )
-@pytest.mark.parametrize("prefix", ["#11 and #12", "None.", ""])
+@pytest.mark.parametrize("prefix", ["#11, #12 and #48", "None.", ""])
 def test_unsupported_dependency_references_are_never_silently_dropped(unsupported, prefix):
     value = snapshot()
     assert management.check_issue_snapshot(value, now=NOW) == 14
-    if prefix != "#11 and #12":
+    if prefix != "#11, #12 and #48":
         value["dependencies"] = []
     value["issue"]["body"] = value["issue"]["body"].replace(
-        "#11 and #12", f"{prefix} {unsupported}".strip()
+        "#11, #12 and #48", f"{prefix} {unsupported}".strip()
     )
     with pytest.raises(management.ManagementError, match="unsupported issue-reference"):
         management.check_issue_snapshot(value, now=NOW)
@@ -365,7 +365,9 @@ def test_live_fetch_refuses_unsupported_dependencies_before_any_dependency_reque
     value = fetch_fixture(fake_http_records(), requests)
     assert management.check_issue_snapshot(value, now=NOW) == 14
     records = fake_http_records()
-    records[14]["body"] = records[14]["body"].replace("#11 and #12", f"#11 and #12, {unsupported}")
+    records[14]["body"] = records[14]["body"].replace(
+        "#11, #12 and #48", f"#11, #12 and #48, {unsupported}"
+    )
     requests.clear()
     with pytest.raises(management.ManagementError, match="unsupported issue-reference"):
         fetch_fixture(records, requests)
@@ -378,14 +380,14 @@ def test_live_fetch_refuses_unsupported_dependencies_before_any_dependency_reque
 @pytest.mark.parametrize("context", ["alone", "supported", "none"])
 def test_unsupported_dependency_urls_are_refused_as_whole_tokens(unsupported, context):
     records = fake_http_records()
-    prefix = "None." if context == "none" else "#11 and #12"
-    records[14]["body"] = records[14]["body"].replace("#11 and #12", prefix)
+    prefix = "None." if context == "none" else "#11, #12 and #48"
+    records[14]["body"] = records[14]["body"].replace("#11, #12 and #48", prefix)
     requests = []
     value = fetch_fixture(records, requests)
     assert management.check_issue_snapshot(value, now=NOW) == 14
     owners, dependencies = management.issue_contract(value["issue"]["body"])
     assert owners == {"owner": "Codex", "reviewer": "Claude"}
-    assert dependencies == (set() if context == "none" else {11, 12})
+    assert dependencies == (set() if context == "none" else {11, 12, 48})
     if context != "none":
         assert (
             management.check_live_claim(
@@ -558,7 +560,7 @@ def test_cli_distinguishes_offline_snapshot_from_live_fetch(
     assert "live GitHub fetch GH-14" in live.out
     assert "does not authorize promotion" in live.out
     assert "offline snapshot" not in live.out and not live.err
-    assert live_transport.requests == [14, 11, 12]
+    assert live_transport.requests == [14, 11, 12, 48]
     assert live_transport.state["handler"] is live_transport.previous
 
 
@@ -595,7 +597,7 @@ def test_cli_mixed_modes_are_refused_before_file_auth_or_network_access(
     assert not output.out
 
 
-@pytest.mark.parametrize("interrupted_decode", [1, 2, 3])
+@pytest.mark.parametrize("interrupted_decode", [1, 2, 3, 4])
 def test_live_decode_deadline_preserves_fixed_diagnostic_and_restores_timer(
     live_transport, monkeypatch, interrupted_decode
 ):
@@ -660,7 +662,7 @@ def test_live_gate_uses_fixed_get_ids_and_explicit_credential_without_network():
         == 14
     )
     assert [item[0] for item in requests] == [
-        f"https://api.github.com/repos/{management.REPOSITORY}/issues/{n}" for n in (14, 11, 12)
+        f"https://api.github.com/repos/{management.REPOSITORY}/issues/{n}" for n in (14, 11, 12, 48)
     ]
     assert all(
         method == "GET" and key == "Bearer fixture-token" and timeout == 5
@@ -774,10 +776,12 @@ def test_live_claim_cannot_change_the_versioned_task_contract(change):
         == 14
     )
     if change == "removed_dependency":
-        value["issue"]["body"] = value["issue"]["body"].replace("#11 and #12", "None.")
+        value["issue"]["body"] = value["issue"]["body"].replace("#11, #12 and #48", "None.")
         value["dependencies"] = []
     elif change == "added_dependency":
-        value["issue"]["body"] = value["issue"]["body"].replace("#11 and #12", "#11, #12 and #15")
+        value["issue"]["body"] = value["issue"]["body"].replace(
+            "#11, #12 and #48", "#11, #12, #15 and #48"
+        )
         value["dependencies"].append(
             {"number": 15, "html_url": management.ISSUE_URL + "15", "state": "closed"}
         )
@@ -823,7 +827,7 @@ def test_workflow_dashboard_claim_keeps_roles_dependencies_and_promotion_gate(ch
         html_url=management.ISSUE_URL + "32",
         title="Render a standalone workflow report dashboard",
         body=value["issue"]["body"]
-        .replace("#11 and #12", "#13 and #28")
+        .replace("#11, #12 and #48", "#13 and #28")
         .replace(
             "Preserve two fresh sessions.", "Render a validated report with escaped unknowns."
         ),
@@ -900,7 +904,7 @@ def test_service_store_claim_keeps_roles_dependencies_and_promotion_gate(change,
         html_url=management.ISSUE_URL + "36",
         title="Add a standalone durable service job store",
         body=value["issue"]["body"]
-        .replace("#11 and #12", "#13")
+        .replace("#11, #12 and #48", "#13")
         .replace("Preserve two fresh sessions.", "Preserve durable unknown job states."),
     )
     value["dependencies"] = [
@@ -975,7 +979,7 @@ def test_host_vm_source_claim_keeps_review_dependency_and_separate_custody(chang
         html_url=management.ISSUE_URL + "40",
         title="Prepare finite Host and VM validation operators",
         body=value["issue"]["body"]
-        .replace("#11 and #12", "#13")
+        .replace("#11, #12 and #48", "#13")
         .replace("Preserve two fresh sessions.", "Prepare only finite Host and VM Sources."),
     )
     value["dependencies"] = [
@@ -1052,7 +1056,7 @@ def test_workflow_cli_claim_keeps_saved_data_dependencies_and_custody(change, me
     value["issue"].update(
         number=42,
         html_url=management.ISSUE_URL + "42",
-        body=value["issue"]["body"].replace("#11 and #12", "#13, #28 and #32"),
+        body=value["issue"]["body"].replace("#11, #12 and #48", "#13, #28 and #32"),
     )
     value["dependencies"] = [
         {"number": n, "html_url": management.ISSUE_URL + str(n), "state": "closed"}
@@ -1119,7 +1123,7 @@ def test_workflow_cli_claim_keeps_saved_data_dependencies_and_custody(change, me
 
 def test_live_aggregate_bound_has_genuine_below_cap_control():
     records = fake_http_records()
-    records[14]["body"] = records[14]["body"].replace("#11 and #12", "#11, #12, #15 and #16")
+    records[14]["body"] = records[14]["body"].replace("#11, #12 and #48", "#11, #12, #15 and #16")
     for number in (15, 16):
         records[number] = {
             "number": number,
@@ -1175,7 +1179,7 @@ def test_service_intake_claim_requires_only_the_registered_closed_store_dependen
     value["issue"].update(
         number=46,
         html_url=management.ISSUE_URL + "46",
-        body=value["issue"]["body"].replace("#11 and #12", "#13 and #36"),
+        body=value["issue"]["body"].replace("#11, #12 and #48", "#13 and #36"),
     )
     value["dependencies"] = [
         {"number": number, "html_url": management.ISSUE_URL + str(number), "state": "closed"}
@@ -1203,3 +1207,62 @@ def test_service_intake_claim_requires_only_the_registered_closed_store_dependen
             management.check_live_claim(
                 changed, tasks=tasks, expected_issue=46, manual_claims=[10], now=NOW
             )
+
+
+def test_workflow_bridge_claim_requires_closed_core_without_native_dependency():
+    value = snapshot()
+    value["issue"].update(
+        number=48,
+        html_url=management.ISSUE_URL + "48",
+        body=value["issue"]["body"].replace("#11, #12 and #48", "#11 and #13"),
+    )
+    value["dependencies"] = [
+        {"number": number, "html_url": management.ISSUE_URL + str(number), "state": "closed"}
+        for number in (11, 13)
+    ]
+    tasks = registered_tasks()
+    assert (
+        management.check_live_claim(
+            value, tasks=tasks, expected_issue=48, manual_claims=[10], now=NOW
+        )
+        == 48
+    )
+    for references, dependencies, message in (
+        ("#13", ((13, "closed"),), "versioned plan"),
+        ("#11 and #13", ((11, "open"), (13, "closed")), "still open/unknown"),
+    ):
+        changed = deepcopy(value)
+        changed["issue"]["body"] = changed["issue"]["body"].replace("#11 and #13", references)
+        changed["dependencies"] = [
+            {"number": number, "html_url": management.ISSUE_URL + str(number), "state": state}
+            for number, state in dependencies
+        ]
+        with pytest.raises(management.ManagementError, match=message):
+            management.check_live_claim(
+                changed, tasks=tasks, expected_issue=48, manual_claims=[10], now=NOW
+            )
+
+
+def test_parent_process_claim_waits_for_bridge_and_rejects_pending_old_body():
+    value = snapshot()
+    tasks = registered_tasks()
+    assert (
+        management.check_live_claim(
+            value, tasks=tasks, expected_issue=14, manual_claims=[10], now=NOW
+        )
+        == 14
+    )
+    old_body = deepcopy(value)
+    old_body["issue"]["body"] = old_body["issue"]["body"].replace("#11, #12 and #48", "#11 and #12")
+    old_body["dependencies"] = [row for row in old_body["dependencies"] if row["number"] != 48]
+    assert management.check_issue_snapshot(old_body, now=NOW) == 14
+    with pytest.raises(management.ManagementError, match="versioned plan"):
+        management.check_live_claim(
+            old_body, tasks=tasks, expected_issue=14, manual_claims=[10], now=NOW
+        )
+    pending_child = deepcopy(value)
+    next(row for row in pending_child["dependencies"] if row["number"] == 48)["state"] = "open"
+    with pytest.raises(management.ManagementError, match="still open/unknown"):
+        management.check_live_claim(
+            pending_child, tasks=tasks, expected_issue=14, manual_claims=[10], now=NOW
+        )
