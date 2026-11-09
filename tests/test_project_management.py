@@ -1168,3 +1168,38 @@ def test_real_transport_branch_owns_and_restores_absolute_deadline_without_netwo
     )
     assert ("timer", 2, 10) in changes and ("timer", 2, 0) in changes
     assert state["handler"] is previous
+
+
+def test_service_intake_claim_requires_only_the_registered_closed_store_dependencies():
+    value = snapshot()
+    value["issue"].update(
+        number=46,
+        html_url=management.ISSUE_URL + "46",
+        body=value["issue"]["body"].replace("#11 and #12", "#13 and #36"),
+    )
+    value["dependencies"] = [
+        {"number": number, "html_url": management.ISSUE_URL + str(number), "state": "closed"}
+        for number in (13, 36)
+    ]
+    tasks = registered_tasks()
+    assert (
+        management.check_live_claim(
+            value, tasks=tasks, expected_issue=46, manual_claims=[10], now=NOW
+        )
+        == 46
+    )
+    for references, dependencies, message in (
+        ("#13", ((13, "closed"),), "versioned plan"),
+        ("#13 and #36", ((13, "closed"), (36, "open")), "still open/unknown"),
+        ("#12, #13 and #36", ((12, "closed"), (13, "closed"), (36, "closed")), "versioned plan"),
+    ):
+        changed = deepcopy(value)
+        changed["issue"]["body"] = changed["issue"]["body"].replace("#13 and #36", references)
+        changed["dependencies"] = [
+            {"number": number, "html_url": management.ISSUE_URL + str(number), "state": state}
+            for number, state in dependencies
+        ]
+        with pytest.raises(management.ManagementError, match=message):
+            management.check_live_claim(
+                changed, tasks=tasks, expected_issue=46, manual_claims=[10], now=NOW
+            )
