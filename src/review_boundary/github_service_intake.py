@@ -248,6 +248,15 @@ class IntakeStore:
                 os.fsync(parent_fd)
             finally:
                 os.close(parent_fd)
+        else:
+            # Establish an existing intake claim before creating even a lock file.
+            # Its lifecycle is checked again under the cooperative lock below.
+            if not os.path.lexists(path / MARKER):
+                _need(
+                    not os.path.lexists(path / SESSION) and not os.path.lexists(path / STAGING),
+                    "reconciliation_required",
+                )
+            self._read_marker()
         self._lock_fd = os.open(path / LOCK, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
         lock_info = os.fstat(self._lock_fd)
         _need(
@@ -280,18 +289,8 @@ class IntakeStore:
             os.fsync(self._dir_fd)
         else:
             try:
-                self._marker_raw = _bounded_file(path / MARKER, 1024, private=True)
-                marker_info = (path / MARKER).lstat()
-                self._marker_identity = (marker_info.st_dev, marker_info.st_ino)
-                marker = parse_json_object(self._marker_raw)
-                _need(set(marker) == {"version", "purpose", "database", "state", "session"})
-                _need(type(marker["version"]) is int and marker["version"] == 1)
-                _need(marker["purpose"] == "github-intake-only" and marker["database"] == DATABASE)
+                self._marker_raw, self._marker_identity, marker = self._read_marker()
                 _need(marker["state"] == "clean", "reconciliation_required")
-                _need(
-                    type(marker["session"]) is str
-                    and re.fullmatch(r"[0-9a-f]{32}", marker["session"]) is not None
-                )
                 db_info = (path / DATABASE).lstat()
                 _need(stat.S_ISREG(db_info.st_mode) and db_info.st_uid == os.geteuid())
                 for suffix in ("-journal", "-wal", "-shm"):
@@ -300,6 +299,23 @@ class IntakeStore:
                         _need(stat.S_ISREG(p.lstat().st_mode))
             except FileNotFoundError:
                 raise IntakeError("configuration_refused") from None
+
+    def _read_marker(self) -> tuple[bytes, tuple[int, int], dict]:
+        raw = _bounded_file(self.directory / MARKER, 1024, private=True)
+        info = (self.directory / MARKER).lstat()
+        marker = parse_json_object(raw)
+        _need(set(marker) == {"version", "purpose", "database", "state", "session"})
+        _need(type(marker["version"]) is int and marker["version"] == 1)
+        _need(marker["purpose"] == "github-intake-only" and marker["database"] == DATABASE)
+        _need(
+            type(marker["state"]) is str
+            and marker["state"] in {"clean", "active", "unknown", "reconciliation_required"}
+        )
+        _need(
+            type(marker["session"]) is str
+            and re.fullmatch(r"[0-9a-f]{32}", marker["session"]) is not None
+        )
+        return raw, (info.st_dev, info.st_ino), marker
 
     def _activate(self) -> None:
         fd = os.open(
@@ -691,6 +707,17 @@ def _configuration(args: argparse.Namespace) -> IntakePolicy:
         raise IntakeError("configuration_refused") from None
 
 
+def _restore_signals(loop: asyncio.AbstractEventLoop, previous: dict) -> None:
+    failed = False
+    for signum, handler in previous.items():
+        try:
+            loop.remove_signal_handler(signum)
+            signal.signal(signum, handler)
+        except (OSError, RuntimeError, TypeError, ValueError):
+            failed = True
+    _need(not failed, "outcome_unknown")
+
+
 async def _serve(args: argparse.Namespace, policy: IntakePolicy) -> int:
     owner = await start_server(
         policy=policy,
@@ -701,16 +728,19 @@ async def _serve(args: argparse.Namespace, policy: IntakePolicy) -> int:
     previous = {}
     try:
         for signum in (signal.SIGTERM, signal.SIGHUP):
-            previous[signum] = signal.getsignal(signum)
-            owner.loop.add_signal_handler(signum, owner.stop)
+            handler = signal.getsignal(signum)
+            _need(handler is not None)
+            try:
+                owner.loop.add_signal_handler(signum, owner.stop)
+            except (OSError, RuntimeError, ValueError):
+                raise IntakeError("configuration_refused") from None
+            previous[signum] = handler
         await owner.stopped
     finally:
         try:
             await owner.close()
         finally:
-            for signum, handler in previous.items():
-                owner.loop.remove_signal_handler(signum)
-                signal.signal(signum, handler)
+            _restore_signals(owner.loop, previous)
     return int(owner.store.poisoned)
 
 

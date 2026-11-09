@@ -337,12 +337,14 @@ class StorageTests(Scratch):
     def test_existing_unmarked_empty_or_execution_store_is_not_adopted(self):
         self.directory.mkdir(mode=0o700)
         self.error("configuration_refused", intake.IntakeStore, self.directory)
+        self.assertEqual(list(self.directory.iterdir()), [])
         dbpath = self.directory / intake.DATABASE
         with intake.JobStore(dbpath) as execution:
             execution.enqueue(replace(identity(), run_id=8), now_ms=100)
         before = dbpath.read_bytes()
         self.error("configuration_refused", intake.IntakeStore, self.directory)
         self.assertEqual(dbpath.read_bytes(), before)
+        self.assertEqual(list(self.directory.iterdir()), [dbpath])
 
     def test_unclean_session_and_unknown_marker_write_failure_refuse_restart(self):
         store = self.store()
@@ -394,6 +396,17 @@ class StorageTests(Scratch):
             db.rollback()
         self.assertEqual(len(rows(self.directory)), 0)
         store.retain(identity())
+
+    def test_busy_during_startup_retains_conservative_session_fence(self):
+        store = self.store()
+        store.close()
+        with contextlib.closing(sqlite3.connect(self.directory / intake.DATABASE, timeout=0)) as db:
+            db.execute("BEGIN IMMEDIATE")
+            self.error("busy", intake.IntakeStore, self.directory)
+            db.rollback()
+        self.assertTrue((self.directory / intake.SESSION).is_file())
+        self.error("reconciliation_required", intake.IntakeStore, self.directory)
+        self.assertEqual(rows(self.directory), [])
 
     def test_lifetime_capacity_includes_tombstones_and_exact_replay_survives(self):
         store = self.store()
@@ -853,8 +866,38 @@ class LoopbackTests(unittest.IsolatedAsyncioTestCase):
                 json.loads((self.directory / intake.MARKER).read_bytes())["state"], "clean"
             )
 
+    async def test_unrestorable_signal_handler_refuses_before_any_install_and_closes(self):
+        args = argparse.Namespace(
+            secret_file=str(self.secret_file), intake_directory=str(self.directory), port=0
+        )
+        loop = asyncio.get_running_loop()
+        with (
+            patch.object(intake, "start_server", return_value=self.server),
+            patch.object(intake.signal, "getsignal", return_value=None),
+            patch.object(loop, "add_signal_handler", wraps=loop.add_signal_handler) as install,
+        ):
+            with self.assertRaises(intake.IntakeError) as caught:
+                await intake._serve(args, POLICY)
+            self.assertEqual(caught.exception.code, "configuration_refused")
+            install.assert_not_called()
+        self.assertFalse(self.server.server.is_serving())
+        self.assertFalse((self.directory / intake.SESSION).exists())
+
 
 class InertCliTests(unittest.TestCase):
+    def test_signal_restore_failure_still_attempts_each_owned_handler(self):
+        from unittest.mock import Mock
+
+        loop = Mock()
+        with patch.object(intake.signal, "signal", side_effect=[OSError, None]) as restore:
+            with self.assertRaises(intake.IntakeError) as caught:
+                intake._restore_signals(
+                    loop, {signal.SIGTERM: signal.SIG_DFL, signal.SIGHUP: signal.SIG_IGN}
+                )
+            self.assertEqual(caught.exception.code, "outcome_unknown")
+            self.assertEqual(restore.call_count, 2)
+            self.assertEqual(loop.remove_signal_handler.call_count, 2)
+
     def test_default_help_validation_never_open_bind_or_load_credentials(self):
         with (
             patch.object(intake, "read_secret", side_effect=AssertionError),
