@@ -956,6 +956,83 @@ def test_service_store_claim_keeps_roles_dependencies_and_promotion_gate(change,
         )
 
 
+@pytest.mark.parametrize(
+    "change,message",
+    [
+        ("removed_review_dependency", "versioned plan"),
+        ("added_native_dependency", "versioned plan"),
+        ("switched_roles", "versioned plan"),
+        ("open_review_dependency", "still open/unknown"),
+        ("backlog_off", "explicit dispatch labels"),
+        ("wrong_workspace", "workspace issue mismatch"),
+        ("manual_claim", "manual owner"),
+    ],
+)
+def test_host_vm_source_claim_keeps_review_dependency_and_separate_custody(change, message):
+    value = snapshot()
+    value["issue"].update(
+        number=40,
+        html_url=management.ISSUE_URL + "40",
+        title="Prepare finite Host and VM validation operators",
+        body=value["issue"]["body"]
+        .replace("#11 and #12", "#13")
+        .replace("Preserve two fresh sessions.", "Prepare only finite Host and VM Sources."),
+    )
+    value["dependencies"] = [
+        {"number": 13, "html_url": management.ISSUE_URL + "13", "state": "closed"}
+    ]
+    tasks = registered_tasks()
+    native = deepcopy(next(task for task in tasks if task["id"] == "native-12"))
+    assert (
+        management.check_live_claim(
+            value, tasks=tasks, expected_issue=40, manual_claims=[10], now=NOW
+        )
+        == 40
+    )
+    expected_issue, claims = 40, [10]
+    if change == "removed_review_dependency":
+        value["issue"]["body"] = value["issue"]["body"].replace("#13", "None.")
+        value["dependencies"].clear()
+    elif change == "added_native_dependency":
+        value["issue"]["body"] = value["issue"]["body"].replace("#13", "#13 and #12")
+        value["dependencies"].append(
+            {"number": 12, "html_url": management.ISSUE_URL + "12", "state": "closed"}
+        )
+    elif change == "switched_roles":
+        value["issue"]["body"] = value["issue"]["body"].replace(
+            "Implementation lead: Codex\nIndependent reviewer: Claude",
+            "Implementation lead: Claude\nIndependent reviewer: Codex",
+        )
+        value["issue"]["labels"] = [
+            {"name": name}
+            for name in (
+                "symphony",
+                "dispatch:enabled",
+                "status:ready",
+                "owner:claude",
+                "review:codex",
+            )
+        ]
+    elif change == "open_review_dependency":
+        value["dependencies"][0]["state"] = "open"
+    elif change == "backlog_off":
+        value["issue"]["labels"] = [
+            {"name": name}
+            for name in ("symphony", "status:backlog", "owner:codex", "review:claude")
+        ]
+    elif change == "wrong_workspace":
+        expected_issue = 12
+    else:
+        claims.append(40)
+    if change not in {"open_review_dependency", "backlog_off"}:
+        assert management.check_issue_snapshot(value, now=NOW) == 40
+    with pytest.raises(management.ManagementError, match=message):
+        management.check_live_claim(
+            value, tasks=tasks, expected_issue=expected_issue, manual_claims=claims, now=NOW
+        )
+    assert next(task for task in tasks if task["id"] == "native-12") == native
+
+
 def test_live_aggregate_bound_has_genuine_below_cap_control():
     records = fake_http_records()
     records[14]["body"] = records[14]["body"].replace("#11 and #12", "#11, #12, #15 and #16")

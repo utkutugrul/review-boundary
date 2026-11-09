@@ -319,6 +319,32 @@ Null links are permitted only for future pending tasks.
         "Record scoped actual checks and independent final-source review in the issue/PR."
       ],
       "evidence": []
+    },
+    {
+      "id": "host-vm-source-preparation",
+      "title": "Prepare finite Host and VM validation operators",
+      "issue": "https://github.com/utkutugrul/review-boundary/issues/40",
+      "owner": "Codex",
+      "reviewer": "Claude",
+      "status": "backlog",
+      "dependencies": [
+        "claude-13"
+      ],
+      "acceptance": [
+        "Own only a NEW vm-parent-proposal/ prefix in the fresh GH-40 workspace. All existing files, GH12 product1373/Processdc28, runtime86c23/manifest43eb/helper9b1, old VM/SDK/proof roots, Root records and other workspaces remain read-only.",
+        "Prepare the three missing original literal Host controls, exactly three fixed Docker discovery templates, one ordered VM14 public-probe parent and separate live workspace/origin parents. Preserve original jobs, inputs, Source identities, caps and unknown-owner holds; do not copy the unsafe timeout recorder.",
+        "Keep the normal49B/orphan104B/timeout27B programs exact; timeout is at most 2s active plus 5s cleanup. Retain original overflow as scoped 1 of 4 evidence; no blanket overflow/different-program matrix replay or conflation with the separate earlyEOF route.",
+        "Preserve the full referenced limits, including 30s gate plus 5s reserve, 35s standalone, 65s command, bounded outputs/transport/artifacts/workspace calls, original owners, signal-before-reap and independent EOF/retirement facts. Unknown owners stay held; no invented PASS, cleanup retry or saved-PID authority.",
+        "Source preparation is independent of SDK runtime success. No Host/VM/Docker/provider/application-model/probe/control-process execution, public push, installation, daemon/auth/config change, Root GO or feature edit follows. Full Native12 and all original goal acceptance remain open."
+      ],
+      "validation": [
+        "Check literal/source/reference/roster/limit bindings with static and pure-data controls only inside the new prefix; no reviewed product/owner/SDK/Guard/framework entrypoint execution or installed-world rehash.",
+        "Freeze the later child Source for one genuine ordinary Claude review through the unchanged bridge; preserve partial findings, scope limits and cleanup. Root separately accepts Source and each later runtime operation."
+      ],
+      "evidence": [
+        "Root created actual issue40 backlog/off, assigned utkutugrul, Codex implementation/Claude review and only dependency13, which is closed. Root promotes only after accepted versioned registration and ready exact input/workspace bindings through sole 89907/max2; no label-only relaxation or new Native12 dependency.",
+        "Use Root next-independent-acceptance-preparation/report.json and immutable vm-codec-final-source-binding references. Their old SAME12 writer/Codec status is historical; the new child prefix and qualified 86c23/43eb context do not relabel old outcomes. Active12 scope/body/labels and all existing plan records stay unchanged."
+      ]
     }
   ]
 }
