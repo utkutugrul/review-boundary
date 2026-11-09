@@ -1,5 +1,6 @@
 """Keyless real loopback/SQLite controls. No application or external-network calls."""
 
+import argparse
 import ast
 import asyncio
 import contextlib
@@ -8,6 +9,7 @@ import hmac
 import io
 import json
 import os
+import signal
 import sqlite3
 import tempfile
 import time
@@ -85,6 +87,13 @@ def rows(directory):
         return db.execute("SELECT * FROM jobs ORDER BY idempotency_key").fetchall()
 
 
+def write_secret_fixture(path):
+    """Public synthetic bytes in an exclusively created owner-only test file."""
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "wb") as stream:
+        stream.write(SECRET)
+
+
 class Scratch(unittest.TestCase):
     def setUp(self):
         # A task can choose TMPDIR; resolve the test root to avoid OS /var aliases.
@@ -93,7 +102,7 @@ class Scratch(unittest.TestCase):
         self.root = Path(self.temp.name).resolve()
         self.directory = self.root / "intake"
         self.secret_file = self.root / "secret"
-        self.secret_file.write_bytes(SECRET)
+        write_secret_fixture(self.secret_file)
 
     def error(self, code, function, *args, **kwargs):
         with self.assertRaises(intake.IntakeError) as caught:
@@ -120,6 +129,17 @@ class AuthenticationTests(Scratch):
         self.error("configuration_refused", intake.read_secret, fifo)
         self.error("configuration_refused", intake.read_secret, self.root)
         self.error("configuration_refused", intake.read_secret, Path("relative"))
+
+    def test_secret_permissions_are_private_and_readonly_mode_is_supported(self):
+        for mode in (0o644, 0o660, 0o700):
+            self.secret_file.chmod(mode)
+            self.error("configuration_refused", intake.read_secret, self.secret_file)
+        for mode in (0o400, 0o600):
+            self.secret_file.chmod(mode)
+            self.assertEqual(intake.read_secret(self.secret_file), SECRET)
+        linked_parent = self.root / "parent-link"
+        linked_parent.symlink_to(self.root, target_is_directory=True)
+        self.error("configuration_refused", intake.read_secret, linked_parent / "secret")
 
     def test_policy_canonicalization_and_strict_allowlists(self):
         reordered = intake.IntakePolicy(tuple(reversed(POLICY.repositories)), (202, 201))
@@ -450,6 +470,19 @@ class StorageTests(Scratch):
         store.close()
         self.error("reconciliation_required", intake.IntakeStore, self.directory)
 
+    def test_clock_rollback_is_known_reconciliation_and_preserves_existing_rows(self):
+        store = self.store()
+        original = store.retain(identity())
+        before = rows(self.directory)
+        with patch.object(
+            intake.time, "time_ns", return_value=(original.created_at_ms - 1) * 1_000_000
+        ):
+            self.error("reconciliation_required", store.retain, identity(encoded() + b" "))
+        self.assertEqual(rows(self.directory), before)
+        self.assertEqual(store.refusal, "reconciliation_required")
+        store.close()
+        self.error("reconciliation_required", intake.IntakeStore, self.directory)
+
     def test_marker_path_bounds_duplicate_schema_permissions_and_cooperative_ownership(self):
         store = self.store()
         self.error("busy", intake.IntakeStore, self.directory)
@@ -488,8 +521,12 @@ class StorageTests(Scratch):
         store.retain(identity())
         with patch.object(store._db, "close", side_effect=OSError):
             self.error("outcome_unknown", store.close)
-        # The fixture's intentionally failed close is still ours to release.
-        store._db.close()
+            self.error("busy", intake.IntakeStore, self.directory)
+            self.assertEqual(store._db._db.execute("SELECT 1").fetchone()[0], 1)
+        # An explicit cleanup after the injected failure can confirm closure.
+        store.close()
+        with self.assertRaises(sqlite3.ProgrammingError):
+            store._db._db.execute("SELECT 1")
         self.assertTrue(store.poisoned)
         self.assertNotEqual(
             json.loads((self.directory / intake.MARKER).read_bytes())["state"], "clean"
@@ -522,7 +559,7 @@ class LoopbackTests(unittest.IsolatedAsyncioTestCase):
         self.root = Path(self.temp.name).resolve()
         self.directory = self.root / "intake"
         self.secret_file = self.root / "secret"
-        self.secret_file.write_bytes(SECRET)
+        write_secret_fixture(self.secret_file)
         self.server = await intake.start_server(
             policy=POLICY, secret_file=self.secret_file, intake_directory=self.directory
         )
@@ -785,6 +822,36 @@ class LoopbackTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             json.loads((self.directory / intake.MARKER).read_bytes())["state"], "unknown"
         )
+
+    async def test_actual_sigterm_and_sighup_use_clean_cli_shutdown_and_restore_handlers(self):
+        for signum in (signal.SIGTERM, signal.SIGHUP):
+            if self.server.store._closed:
+                self.server = await intake.start_server(
+                    policy=POLICY, secret_file=self.secret_file, intake_directory=self.directory
+                )
+                self.addAsyncCleanup(self.server.close)
+            previous = signal.getsignal(signum)
+            sockets = tuple(self.server.server.sockets)
+            args = argparse.Namespace(
+                secret_file=str(self.secret_file), intake_directory=str(self.directory), port=0
+            )
+            loop = asyncio.get_running_loop()
+            with (
+                patch.object(intake, "start_server", return_value=self.server),
+                patch.object(loop, "add_signal_handler", wraps=loop.add_signal_handler) as install,
+            ):
+                task = asyncio.create_task(intake._serve(args, POLICY))
+                await asyncio.sleep(0)
+                install.assert_any_call(signum, self.server.stop)
+                self.assertFalse(task.done())
+                signal.raise_signal(signum)
+                self.assertEqual(await asyncio.wait_for(task, 2), 0)
+            self.assertEqual(signal.getsignal(signum), previous)
+            self.assertTrue(all(s.fileno() == -1 for s in sockets))
+            self.assertFalse((self.directory / intake.SESSION).exists())
+            self.assertEqual(
+                json.loads((self.directory / intake.MARKER).read_bytes())["state"], "clean"
+            )
 
 
 class InertCliTests(unittest.TestCase):

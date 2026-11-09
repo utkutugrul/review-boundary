@@ -24,7 +24,8 @@ python -m review_boundary.github_service_intake serve \
 
 These synthetic paths and IDs are examples, not deployment authorization. This
 child does not activate a service or GitHub App. The secret must be an explicit
-regular nonsymlink file containing32..128 raw bytes. Newlines remain significant.
+regular nonsymlink file containing32..128 raw bytes, owned by the effective user
+with mode0400 or0600 and no symlink ancestors. Newlines remain significant.
 There is no default secret or ambient credential lookup. Repeat `--repository`
 and `--sender-id` for additional trusted claims, at most64 pairs and256 senders.
 Repository names must already be canonical lowercase ASCII; IDs are integers
@@ -93,6 +94,9 @@ rotation, subprocess, GitHub API, provider, publisher or budget path is added.
 Known pre-acquisition busy and committed capacity/identity refusals stay distinct
 from `outcome_unknown`. A lost response after a known commit may be reconciled by
 the identical authenticated request on another connection without adding a row.
+Clock rollback is a known `reconciliation_required` refusal: stop intake without
+rewriting identities or claiming a commit became unknown. Restoring a clock or
+resetting its persisted high-water mark is outside this child.
 
 The intake directory must be new on first use, owned by the operator and mode0700.
 An existing directory needs its exact private intake-purpose marker and regular
@@ -124,6 +128,12 @@ Unclean sessions or staging files require explicit operator reconciliation. Ther
 is no reconcile, reset or override switch in this module. Do not delete markers
 or edit SQL to manufacture admission. Clean close never certifies an unresolved
 write, and socket/expiry observations never prove external worker retirement.
+SIGINT, SIGTERM and SIGHUP use the CLI's owned stop/close path. Prior TERM/HUP
+handlers are restored afterward. Forced termination or interruption before
+handler installation can leave an unclean fence; it still requires operator
+reconciliation. No reset command is added. If SQLite close fails, the connection
+and cooperative lock remain owned until a later explicit close confirms closure;
+that cleanup does not reopen the database or retry an intake write.
 
 Responses contain only a fixed `status` category: retained, malformed,
 unauthenticated, forbidden, deadline, identity_conflict, too_large, invalid_payload,
@@ -172,3 +182,13 @@ public dependencies, with no download and fresh task-owned build/install
 environments. The unchanged wheel/sdist parity checker passed. Earlier protocol
 test failures and the corrected close/category defects are preserved in the task
 worklog; independent review and exact-head CI are reported with the PR.
+
+The first genuine Claude review was incomplete because test coverage was partial;
+its four findings and cleanup report remain preserved. The follow-up adds private
+secret-file checks, graceful TERM/HUP handling, a known clock-rollback refusal and
+retained lock custody after a failed SQLite close. Corrected Source and fresh
+wheel installations each passed39 intake tests,39 unchanged store tests and7
+parser controls on Python3.11.15 and3.14.3. The signal control delivered actual
+TERM and HUP to the owned test process and observed clean marker/socket closure
+and restored handlers. Full review and CI evidence for the final immutable head
+belong in the PR; the earlier partial review is not a completed review.

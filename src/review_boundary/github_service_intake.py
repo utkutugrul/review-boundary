@@ -9,6 +9,7 @@ import hmac
 import json
 import os
 import re
+import signal
 import stat
 import time
 from dataclasses import dataclass
@@ -104,14 +105,16 @@ class IntakePolicy:
         return hashlib.sha256(canonical).hexdigest()
 
 
-def _bounded_file(path: Path, limit: int, *, private: bool = False) -> bytes:
+def _bounded_file(
+    path: Path, limit: int, *, private: bool = False, modes: tuple[int, ...] = (0o600,)
+) -> bytes:
     flags = os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW
     fd = os.open(path, flags)
     try:
         info = os.fstat(fd)
         _need(stat.S_ISREG(info.st_mode) and info.st_size <= limit)
         if private:
-            _need(info.st_uid == os.geteuid() and stat.S_IMODE(info.st_mode) == 0o600)
+            _need(info.st_uid == os.geteuid() and stat.S_IMODE(info.st_mode) in modes)
         value = os.read(fd, limit + 1)
         _need(len(value) <= limit)
         return value
@@ -122,8 +125,10 @@ def _bounded_file(path: Path, limit: int, *, private: bool = False) -> bytes:
 def read_secret(path: Path) -> bytes:
     """Read exactly the trusted raw bytes, without trimming or discovery."""
     try:
-        _need(isinstance(path, Path) and path.is_absolute())
-        value = _bounded_file(path, 128)
+        _need(isinstance(path, Path) and path.is_absolute() and len(os.fsencode(path)) <= 4096)
+        for parent in path.parents:
+            _need(stat.S_ISDIR(parent.lstat().st_mode))
+        value = _bounded_file(path, 128, private=True, modes=(0o400, 0o600))
         _need(32 <= len(value) <= 128)
         return value
     except (OSError, ValueError):
@@ -194,6 +199,7 @@ class IntakeStore:
         self._marker_identity = None
         self._closed = False
         self.poisoned = False
+        self.refusal = "outcome_unknown"
         self._session = os.urandom(16).hex()
         try:
             self._prepare()
@@ -352,17 +358,20 @@ class IntakeStore:
         self._marker_identity = (info.st_dev, info.st_ino)
         os.fsync(self._dir_fd)
 
-    def _poison(self) -> None:
+    def _poison(self, code: str = "outcome_unknown") -> None:
         self.poisoned = True
+        self.refusal = code
         try:
-            self._write_marker("unknown")
+            self._write_marker(
+                "unknown" if code == "outcome_unknown" else "reconciliation_required"
+            )
         except (OSError, ValueError):
             # The earlier durable active marker still prevents automatic resume.
             pass
 
     def retain(self, identity: JobIdentity) -> JobRecord:
         _need(not self._closed, "closed")
-        _need(not self.poisoned, "outcome_unknown")
+        _need(not self.poisoned, self.refusal)
         _need(
             type(identity) is JobIdentity
             and all(getattr(identity, p) is None for p in _REFERENCES),
@@ -381,7 +390,7 @@ class IntakeStore:
                 and record.finished_at_ms is None
                 and record.tombstone is False
             ):
-                self._poison()
+                self._poison("reconciliation_required")
                 raise IntakeError("reconciliation_required")
             return record
         except IntakeError as error:
@@ -392,6 +401,9 @@ class IntakeStore:
         except StoreError as error:
             if error.code in {"busy", "capacity", "identity_conflict"}:
                 raise IntakeError(error.code) from None
+            if error.code == "time":
+                self._poison("reconciliation_required")
+                raise IntakeError("reconciliation_required") from None
             self._poison()
             raise IntakeError("outcome_unknown") from None
         # Unexpected storage diagnostics must not escape into protocol logging.
@@ -419,9 +431,11 @@ class IntakeStore:
     def close(self) -> None:
         if self._closed:
             return
+        database_closed = False
         try:
             if self._db is not None:
                 self._db.close()
+            database_closed = True
             if not self.poisoned:
                 self._write_marker("clean")
                 self._ownership()
@@ -435,8 +449,11 @@ class IntakeStore:
             self._poison()
             raise
         finally:
-            self._closed = True
-            self._release(database=False)
+            if database_closed:
+                self._closed = True
+                self._release(database=False)
+            # Failed close retains the SQLite handle and cooperative lock. An
+            # explicit later close may release custody, never retry an intake.
 
 
 def _response(code: str) -> bytes:
@@ -609,7 +626,7 @@ class IntakeServer:
         if self.server is not None:
             self.server.close()
         for connection in tuple(self.connections):
-            connection.respond("outcome_unknown" if self.store.poisoned else "closed")
+            connection.respond(self.store.refusal if self.store.poisoned else "closed")
         if not self.stopped.done():
             self.stopped.set_result(None)
 
@@ -681,10 +698,19 @@ async def _serve(args: argparse.Namespace, policy: IntakePolicy) -> int:
         intake_directory=Path(args.intake_directory),
         port=args.port,
     )
+    previous = {}
     try:
+        for signum in (signal.SIGTERM, signal.SIGHUP):
+            previous[signum] = signal.getsignal(signum)
+            owner.loop.add_signal_handler(signum, owner.stop)
         await owner.stopped
     finally:
-        await owner.close()
+        try:
+            await owner.close()
+        finally:
+            for signum, handler in previous.items():
+                owner.loop.remove_signal_handler(signum)
+                signal.signal(signum, handler)
     return int(owner.store.poisoned)
 
 
