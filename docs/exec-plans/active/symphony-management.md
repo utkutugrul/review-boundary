@@ -259,7 +259,7 @@ Null links are permitted only for future pending tasks.
       "issue": "https://github.com/utkutugrul/review-boundary/issues/36",
       "owner": "Codex",
       "reviewer": "Claude",
-      "status": "backlog",
+      "status": "done",
       "dependencies": [
         "claude-13"
       ],
@@ -275,7 +275,9 @@ Null links are permitted only for future pending tasks.
         "Check the exact three-new-file scope, scoped lint/format/management contracts and local wheel inclusion. Obtain one genuine ordinary installed Claude final-Source review through the unchanged bridge; preserve partial/failed results and exact-head CI/Root acceptance."
       ],
       "evidence": [
-        "Root created actual issue36 backlog with dispatch disabled, Codex implementation, Claude review and dependency13. Actual13 is closed. This plan binding does not implement or promote it; full SERVICE17 retains Native12/REPORTS15 and must later integrate the store."
+        "PR38 delivered reviewed Source bd70c1de1bfe4d8e0ebbe33e3d1bdd02237e3082 as accepted main 1fe68bce322e9394d56eee32d5e9405b6229c706, exact tree d0e653ca31f7992acf49602cbbf39ff6ebd37132. All 281 existing blobs/modes were preserved. Actual issue36 is closed with dispatch disabled.",
+        "The 39 real SQLite methods and 165 management cases passed on each Python 3.11.15/3.14.3. Genuine final three-path ordinary Claude review completed with zero findings, nine groups reaped/absent/bothEOF and scratch removed. Root verified package parity and both exact-head CI runs: 4434 Python cases plus 311 subtests and 84 Node cases per runtime; 12 successes and two conditional skips.",
+        "This delivers the standalone local store only. Full SERVICE17 retains Native12/REPORTS15/store dependencies and still requires authenticated receiver/store/worker/CLI integration, exact returned-run/artifact verification and honest external-outcome reconciliation. No service activation follows."
       ]
     },
     {
