@@ -306,6 +306,16 @@ def parser():
     dashboard.add_argument(
         "--suite", type=Path, help="Optional bounded JSON case data for snapshot restoration"
     )
+    workflow_dashboard = commands.add_parser(
+        "workflow-dashboard", help="Render one saved workflow_run report as standalone HTML"
+    )
+    workflow_dashboard.add_argument("report", type=Path, help="One workflow_run report JSON file")
+    workflow_dashboard.add_argument(
+        "--output", type=Path, required=True, help="New standalone HTML path"
+    )
+    workflow_dashboard.add_argument(
+        "--expected", type=Path, help="Optional original expected roster JSON"
+    )
     ci = commands.add_parser(
         "ci",
         help="Reproduce a baseline's cases and check for regressions",
@@ -854,6 +864,13 @@ def main(argv=None):
                 if args.command == "adjudication-export"
                 else apply_adjudication_command(args)
             )
+        if args.command == "workflow-dashboard":
+            from .workflow_dashboard import _read_input, write_workflow_dashboard
+
+            expected = None if args.expected is None else _read_input(args.expected)
+            output = write_workflow_dashboard(args.report, args.output, expected=expected)
+            print(output.resolve())
+            return 0
         if args.command == "dashboard":
             from .dashboard import default_report_paths, write_dashboard
             from .json_input import read_json_object
