@@ -345,6 +345,34 @@ Null links are permitted only for future pending tasks.
         "Root created actual issue40 backlog/off, assigned utkutugrul, Codex implementation/Claude review and only dependency13, which is closed. Root promotes only after accepted versioned registration and ready exact input/workspace bindings through sole 89907/max2; no label-only relaxation or new Native12 dependency.",
         "Use Root next-independent-acceptance-preparation/report.json and immutable vm-codec-final-source-binding references. Their old SAME12 writer/Codec status is historical; the new child prefix and qualified 86c23/43eb context do not relabel old outcomes. Active12 scope/body/labels and all existing plan records stay unchanged."
       ]
+    },
+    {
+      "id": "workflow-dashboard-cli",
+      "title": "Route saved workflow dashboards through the shared CLI",
+      "issue": "https://github.com/utkutugrul/review-boundary/issues/42",
+      "owner": "Codex",
+      "reviewer": "Claude",
+      "status": "backlog",
+      "dependencies": [
+        "claude-13",
+        "workflow-report-contract",
+        "workflow-dashboard"
+      ],
+      "acceptance": [
+        "Own only src/review_boundary/cli.py plus NEW tests/test_cli_workflow_dashboard.py and docs/workflow-cli.md. Reuse delivered32 schema/renderer/assets/fixtures and package entry byte-identically; all Native56, private12/40 and Root scopes remain read-only.",
+        "Add workflow-dashboard REPORT --output NEW_HTML [--expected ROSTER] to shared parser/early dispatch through the existing bounded writer/validator. No credential/environment-loader/provider/model/budget/runner calls; existing eager SDK/dotenv imports remain qualified, not an SDK-free cold import.",
+        "Preserve input and embedded document identity, missing/unknown/false/zero denominators and scripted/authenticity limits. Valid incomplete rendering exits 0 only for rendering and retains 3 missing sessions, 2 unknown reviewer values and false run_completed.",
+        "Refuse malformed/duplicate-key/tampered/mismatched/oversized input and overwrite aliases; preserve unchanged writer publication uncertainty and error exit 2. No new schema, HTML sink, compare/export/adjudication or Native integration.",
+        "Installed-console/package proof uses a fresh task-owned environment/artifact path. Never install into or modify Root frozen venv-py311/venv-py314, GH12 product/cache/SDK/proof roots or other workspaces. Full14/15 dependencies and all original acceptance remain open."
+      ],
+      "validation": [
+        "After explicit Root promotion, run selected meaningful keyless shared parser/main, installed console and refusal controls on both supported runtimes with bytecode/plugins/caches disabled and owned temp paths; verify Source identity and appropriate local package parity.",
+        "Freeze final Source for genuine ordinary Claude review with necessary entry/renderer/schema context. Preserve incomplete findings/limits/cleanup and exact-head CI; Source registration grants no runtime or application-model authority."
+      ],
+      "evidence": [
+        "Root created actual issue42 backlog/off with Codex/Claude/utkutugrul and closed13/28/32. Promotion requires accepted versioned registration and fresh roles/dependency/workspace claim; sole 89907/max2 and reserved manual10 remain unchanged.",
+        "Entry audit: cli blob 05859a92 is identical in public2f/frozen1373 and outside Native56. Base48da2afd preserves all13 original records and Native12/40/full15 custody and dependencies."
+      ]
     }
   ]
 }
