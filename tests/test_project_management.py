@@ -1059,6 +1059,11 @@ def test_workflow_cli_claim_keeps_saved_data_dependencies_and_custody(change, me
         for n in (13, 28, 32)
     ]
     tasks = registered_tasks()
+    with pytest.raises(management.ManagementError, match="completed plan task"):
+        management.check_live_claim(
+            value, tasks=tasks, expected_issue=42, manual_claims=[10], now=NOW
+        )
+    next(task for task in tasks if task["id"] == "workflow-dashboard-cli")["status"] = "ready"
     assert (
         management.check_live_claim(
             value, tasks=tasks, expected_issue=42, manual_claims=[10], now=NOW

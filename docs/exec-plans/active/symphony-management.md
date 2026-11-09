@@ -352,7 +352,7 @@ Null links are permitted only for future pending tasks.
       "issue": "https://github.com/utkutugrul/review-boundary/issues/42",
       "owner": "Codex",
       "reviewer": "Claude",
-      "status": "backlog",
+      "status": "done",
       "dependencies": [
         "claude-13",
         "workflow-report-contract",
@@ -371,7 +371,10 @@ Null links are permitted only for future pending tasks.
       ],
       "evidence": [
         "Root created actual issue42 backlog/off with Codex/Claude/utkutugrul and closed13/28/32. Promotion requires accepted versioned registration and fresh roles/dependency/workspace claim; sole 89907/max2 and reserved manual10 remain unchanged.",
-        "Entry audit: cli blob 05859a92 is identical in public2f/frozen1373 and outside Native56. Base48da2afd preserves all13 original records and Native12/40/full15 custody and dependencies."
+        "Entry audit: cli blob 05859a92 is identical in public2f/frozen1373 and outside Native56. Base48da2afd preserves all13 original records and Native12/40/full15 custody and dependencies.",
+        "Delivered by PR44 as main f22e466b2074822d71aae897caf122f913408768, tree c7a64282c21b73becd8413223e3d9e9905530e93 equal reviewed head 84923f64. Issue42 is closed with dispatch off; exactly three feature paths changed and all 283 other baseline blobs/modes remained unchanged.",
+        "Actual keyless checks passed 570 tests and 19 subtests each on Python 3.11.15/3.14.3, 16 installed-console commands and 98-file package parity. Final genuine Claude review completed six paths with one inherited fail-closed P3 diagnostic retained. Exact-head CI passed 4487 Python tests/311 subtests per supported job and 84 browser cases, with 12 successful checks and two conditional publisher skips.",
+        "This delivers saved-data rendering only. Missing/unknown denominators and recorded_data_only/authenticity limits remain explicit; eager SDK/dotenv imports stay qualified. Full PROCESS14, REPORTS15, Native/VM, model/accounting and broader integration acceptance remain open."
       ]
     }
   ]
