@@ -13,11 +13,14 @@ from dataclasses import FrozenInstanceError
 from pathlib import Path
 from unittest.mock import patch
 
+from pydantic import ValidationError
+
 # This module selects only the checked-out Source, without discovering SDK tests.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from review_boundary import workflow_bridge_io as bridge
 from review_boundary.workflow_cases import (
+    WorkflowJSONResourceError,
     WorkflowLimits,
     WorkflowRunBinding,
     bounded_json,
@@ -243,6 +246,7 @@ class TraceWitness(Witness):
                 "label": label,
                 "closed_after_product": file.closed,
                 "actual_close_calls": self.original_calls.count((label, "close", "call")),
+                "actual_close_returns": self.original_calls.count((label, "close", "return")),
                 "retained_by_identity": any(resource is file for resource in custody),
             }
             for label, file in self.files
@@ -254,15 +258,18 @@ class TraceWitness(Witness):
             "injection": self.fired,
             "files": files,
             "original_operation_order": self.original_calls,
-            "directory_close_calls": len(self.directories),
+            # Wrapper entries, without an independent kernel-success observation.
+            "directory_close_wrapper_entries": len(self.directories),
             "custody_count": len(custody),
             "interruption": isinstance(error, KeyboardInterrupt),
-            "test_caller_close_calls": sum(not file.closed for _, file in self.files),
+            "open_witnessed_fileio_before_test_caller_cleanup": sum(
+                not file.closed for _, file in self.files
+            ),
         }
         self.retire_custody()
         if not all(file.closed for _, file in self.files):
             raise AssertionError("test caller cleanup failed")
-        row["all_originals_closed_after_test_caller_cleanup"] = True
+        row["all_witnessed_fileio_closed_after_test_caller_cleanup"] = True
         print(json.dumps(row, sort_keys=True))
 
 
@@ -469,10 +476,10 @@ class WorkflowBridgeIOTests(unittest.TestCase):
         self.error(lambda: self.write(producer_snapshot=fatal), "incomplete", "validate")
         self.assertFalse(self.directory.exists())
 
-    def test_schema_valid_oversize_full_bridge_envelope_is_effect_free(self):
-        # Snapshot schema permits this note roster, but real producer dispatch
-        # has the tighter budget. Neither a forged replay nor its oversized
-        # full envelope may create a namespace or widen the 16384-byte core cap.
+    def test_replay_inconsistent_oversize_snapshot_refuses_before_seal(self):
+        # Retain the original model-copy input and enlarged local envelope.
+        # Its unchanged events replay different notes, so replay refuses before
+        # sealing. This does not isolate the whole-envelope byte guard.
         large = checked(
             WorkflowSnapshot, self.snapshot.model_copy(update={"notes": ("x" * 2040,) * 8})
         )
@@ -490,8 +497,28 @@ class WorkflowBridgeIOTests(unittest.TestCase):
         )
         self.assertLessEqual(len(payload), 16384)
         self.assertGreater(len(canonical_bytes(envelope)), 16384)
-        self.error(lambda: self.write(producer_snapshot=large), "invalid", "validate")
+        with (
+            patch.object(bridge, "replay_workflow", wraps=bridge.replay_workflow) as replay,
+            patch.object(bridge, "seal_workflow_bridge", wraps=bridge.seal_workflow_bridge) as seal,
+        ):
+            error = self.error(lambda: self.write(producer_snapshot=large), "invalid", "validate")
+        self.assertEqual(replay.call_count, 1)
+        self.assertEqual(replay.call_args.args[1], (large,))
+        self.assertEqual(seal.call_count, 0)
         self.assertFalse(self.directory.exists())
+        print(
+            json.dumps(
+                {
+                    "control": "replay_inconsistent_oversize_snapshot",
+                    "replay_calls": replay.call_count,
+                    "seal_calls": seal.call_count,
+                    "error": [error.code, error.phase],
+                    "leaf_absent": not self.directory.exists(),
+                    "local_envelope_bytes": len(canonical_bytes(envelope)),
+                },
+                sort_keys=True,
+            )
+        )
 
     def test_independent_trusted_case_run_reviewer_epoch_guard_limits_session(self):
         self.write()
@@ -799,6 +826,25 @@ class WorkflowBridgeIOTests(unittest.TestCase):
                     if fault[1] == "close":
                         original = next(file for label, file in witness.files if label == fault[0])
                         self.assertTrue(any(resource is original for resource in error._unclosed))
+                        calls = witness.original_calls.count((fault[0], "close", "call"))
+                        returns = witness.original_calls.count((fault[0], "close", "return"))
+                        after = fault[2] == "after"
+                        self.assertEqual(
+                            (calls, returns, original.closed), (int(after), int(after), after)
+                        )
+                        print(
+                            json.dumps(
+                                {
+                                    "control": "writer_original_close_fault",
+                                    "fault": fault,
+                                    "actual_calls": calls,
+                                    "actual_returns": returns,
+                                    "original_closed_after_product": original.closed,
+                                    "original_retained_by_identity": True,
+                                },
+                                sort_keys=True,
+                            )
+                        )
                     before = {
                         p.name: (p.stat().st_ino, p.read_bytes()) for p in directory.iterdir()
                     }
@@ -861,6 +907,28 @@ class WorkflowBridgeIOTests(unittest.TestCase):
                     self.assertTrue(witness.failed)
                     witness.assert_disposition(self, error)
                     self.assertEqual({p.name for p in self.directory.iterdir()}, set(bridge._NAMES))
+                    if fault[1] == "close":
+                        original = next(file for label, file in witness.files if label == fault[0])
+                        self.assertTrue(any(resource is original for resource in error._unclosed))
+                        calls = witness.original_calls.count((fault[0], "close", "call"))
+                        returns = witness.original_calls.count((fault[0], "close", "return"))
+                        after = fault[2] == "after"
+                        self.assertEqual(
+                            (calls, returns, original.closed), (int(after), int(after), after)
+                        )
+                        print(
+                            json.dumps(
+                                {
+                                    "control": "reader_original_close_fault",
+                                    "fault": fault,
+                                    "actual_calls": calls,
+                                    "actual_returns": returns,
+                                    "original_closed_after_product": original.closed,
+                                    "original_retained_by_identity": True,
+                                },
+                                sort_keys=True,
+                            )
+                        )
                 finally:
                     witness.retire_custody()
         self.assertEqual(self.reopen().producer_snapshot, self.snapshot)
@@ -980,6 +1048,11 @@ class WorkflowBridgeIOTests(unittest.TestCase):
             witness.assert_disposition(self, raised.exception)
             resource = next(file for label, file in witness.files if label == "complete.json:rb")
             self.assertIs(raised.exception._workflow_bridge_unclosed[0], resource)
+            self.assertFalse(resource.closed)
+            self.assertEqual(witness.original_calls.count(("complete.json:rb", "close", "call")), 0)
+            self.assertEqual(
+                witness.original_calls.count(("complete.json:rb", "close", "return")), 0
+            )
         finally:
             witness.retire_custody()
 
@@ -992,6 +1065,10 @@ class WorkflowBridgeIOTests(unittest.TestCase):
             original = next(file for label, file in witness.files if label == "complete.json:rb")
             reference = weakref.ref(original)
             self.assertIs(error._unclosed[0], original)
+            self.assertEqual(witness.original_calls.count(("complete.json:rb", "close", "call")), 0)
+            self.assertEqual(
+                witness.original_calls.count(("complete.json:rb", "close", "return")), 0
+            )
             witness.assert_disposition(self, error)
             del original
             gc.collect()
@@ -1001,23 +1078,87 @@ class WorkflowBridgeIOTests(unittest.TestCase):
             witness.retire_custody()
 
     def test_core_byte_node_and_depth_bounds_remain_unchanged(self):
-        for value, kwargs in (
-            ({"x": "a" * 4096}, {"maximum": 4096, "nodes": 512, "depth": 8}),
-            ({"x": [0] * 512}, {"maximum": 4096, "nodes": 512, "depth": 8}),
-            ({"x": [[[[[[[[[0]]]]]]]]]}, {"maximum": 4096, "nodes": 512, "depth": 8}),
+        # These direct JSON-helper inputs have no field schema to fail first.
+        for value, kwargs, reason in (
+            (
+                {"x": "a" * 4096},
+                {"maximum": 4096, "nodes": 512, "depth": 8},
+                "Workflow JSON byte limit",
+            ),
+            (
+                {"x": [0] * 512},
+                {"maximum": 4096, "nodes": 512, "depth": 8},
+                "Workflow JSON structure limit",
+            ),
+            (
+                {"x": [[[[[[[[[0]]]]]]]]]},
+                {"maximum": 4096, "nodes": 512, "depth": 8},
+                "Workflow JSON structure limit",
+            ),
         ):
-            with self.assertRaises(ValueError):
+            with self.assertRaises(ValueError) as raised:
                 bounded_json(value, **kwargs)
+            self.assertIs(type(raised.exception), WorkflowJSONResourceError)
+            self.assertEqual(str(raised.exception), reason)
         self.assertEqual(len(bounded_json("x" * 14, maximum=16)), 16)
-        with self.assertRaises(ValueError):
+        with self.assertRaises(ValueError) as raised:
             bounded_json("x" * 15, maximum=16)
-        # Existing case/schema caps still run on unchecked model instances.
+        self.assertIs(type(raised.exception), WorkflowJSONResourceError)
+        self.assertEqual(str(raised.exception), "Workflow JSON byte limit")
+
+        # A dict, its key, its list and 509 scalars total exactly 512 nodes.
+        at_node_cap = {"x": [0] * 509}
+        caps = {"maximum": 4096, "nodes": 512, "depth": 8}
+        self.assertEqual(json.loads(bounded_json(at_node_cap, **caps)), at_node_cap)
+        with self.assertRaises(WorkflowJSONResourceError) as raised:
+            bounded_json({"x": [0] * 510}, **caps)
+        self.assertEqual(str(raised.exception), "Workflow JSON structure limit")
+        at_depth_cap = 0
+        for _ in range(8):
+            at_depth_cap = [at_depth_cap]
+        self.assertEqual(json.loads(bounded_json(at_depth_cap, **caps)), at_depth_cap)
+        with self.assertRaises(WorkflowJSONResourceError) as raised:
+            bounded_json([at_depth_cap], **caps)
+        self.assertEqual(str(raised.exception), "Workflow JSON structure limit")
+
+        # Direct case checking applies canonical resource guarding before its
+        # model schema. This oversized case_id hits the string guard first.
         invalid_case = self.case.model_copy(update={"case_id": "x" * 131073})
-        with self.assertRaises(ValueError):
+        with self.assertRaises(ValueError) as raised:
             validate_workflow_case(invalid_case)
+        self.assertIs(type(raised.exception), WorkflowJSONResourceError)
+        self.assertEqual(str(raised.exception), "Workflow JSON string limit")
+
+        # The writer first revalidates Python fields. This negative exercises
+        # repository_json's 1 MiB field limit, not the aggregate trace-byte cap.
         invalid_snapshot = self.snapshot.model_copy(update={"repository_json": "x" * 2097153})
+        with self.assertRaises(ValidationError) as raised:
+            WorkflowSnapshot.model_validate(
+                invalid_snapshot.model_dump(mode="python", warnings=False)
+            )
+        self.assertEqual(
+            [
+                (item["loc"], item["type"], item.get("ctx"))
+                for item in raised.exception.errors(include_input=False, include_url=False)
+            ],
+            [(("repository_json",), "string_too_long", {"max_length": 1048576})],
+        )
         self.error(lambda: self.write(producer_snapshot=invalid_snapshot), "invalid", "validate")
         self.assertFalse(self.directory.exists())
+        print(
+            json.dumps(
+                {
+                    "control": "json_resource_boundary_attribution",
+                    "schema_free_byte_pair": [16, 17],
+                    "schema_free_node_pair": [512, 513],
+                    "schema_free_depth_pair": [8, 9],
+                    "case_id_131073": "WorkflowJSONResourceError:Workflow JSON string limit",
+                    "repository_json_2097153": "ValidationError:repository_json:string_too_long:1048576",
+                    "isolated_aggregate_trace_cap_proof": False,
+                },
+                sort_keys=True,
+            )
+        )
 
     def test_real_close_bookkeeping_line_boundaries(self):
         # Current imported ownership logic, real acquired originals, no OS signal.
@@ -1085,6 +1226,10 @@ class WorkflowBridgeIOTests(unittest.TestCase):
                 self.assertEqual(
                     witness.original_calls.count((name + ":xb", "close", "call")), calls
                 )
+                self.assertEqual(
+                    witness.original_calls.count((name + ":xb", "close", "return")), calls
+                )
+                self.assertEqual(target.resource.closed, bool(calls))
                 self.assertEqual(
                     witness.original_calls.count((label + "-independent:xb", "close", "call")), 1
                 )
