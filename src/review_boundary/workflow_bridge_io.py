@@ -8,6 +8,7 @@ workflow-bridge-io document for the trust assumptions and error mapping.
 import os
 import stat
 from dataclasses import dataclass
+from io import FileIO
 from pathlib import Path
 from typing import Literal
 
@@ -45,8 +46,9 @@ _DATA_ERRORS = (ValueError, TypeError, AttributeError, UnicodeError, RecursionEr
 class WorkflowBridgeIOError(Exception):
     """Fixed diagnostics; _unclosed retains original resources for caller custody.
 
-    A resource in _unclosed has already had its one close attempt. This module
-    never retries it, adopts its descriptor, or treats its state as resolved.
+    A resource in _unclosed lacks an observed successful close. An interruption
+    may precede its close call. This module never retries an attempted close,
+    adopts a descriptor, or treats uncertain custody as resolved.
     """
 
     def __init__(self, code: Code, phase: Phase):
@@ -188,13 +190,15 @@ class _Directory:
         self.fd = fd
 
     def close(self):
-        os.close(self.fd)
+        if self.fd is not None:
+            os.close(self.fd)
 
 
 class _Owned:
     def __init__(self, resource):
         self.resource = resource
         self.attempted = False
+        self.closed = False
 
 
 class _Resources:
@@ -203,7 +207,15 @@ class _Resources:
     def __init__(self, phase):
         self.phase = phase
         self.owned = []
-        self.unclosed = []
+
+    @property
+    def unclosed(self):
+        # Attempt bookkeeping is not an observation of successful closure.
+        return [
+            owner.resource
+            for owner in reversed(self.owned)
+            if owner.resource is not None and not owner.closed
+        ]
 
     def __enter__(self):
         return self
@@ -213,20 +225,25 @@ class _Resources:
         self.owned.append(owner)
         return owner
 
+    def open_file(self, directory, name, mode):
+        # Retain the actual original before it can acquire a descriptor. A
+        # helper-return interruption must not lose an already opened FileIO.
+        owner = self.keep(FileIO.__new__(FileIO))
+        _open_file(directory, name, mode, owner=owner)
+        return owner
+
     def close(self, owner):
         if owner.attempted:
             raise AssertionError("owned close already attempted")
-        owner.attempted = True
         self.phase = "close"
-        try:
+        owner.attempted = True
+        if owner.resource is not None:
             owner.resource.close()
-        except BaseException:
-            self.unclosed.append(owner.resource)
-            raise
+        owner.closed = True
 
     def __exit__(self, _kind, error, _traceback):
         interruption = error if error is not None and not isinstance(error, Exception) else None
-        close_failed = bool(self.unclosed)
+        close_failed = False
         phase = self.phase
         for owner in reversed(self.owned):
             if not owner.attempted:
@@ -237,6 +254,7 @@ class _Resources:
                     close_failed = True
                     if not isinstance(cleanup_error, Exception) and interruption is None:
                         interruption = cleanup_error
+        close_failed = close_failed or bool(self.unclosed)
         if interruption is not None:
             interruption._workflow_bridge_unclosed = tuple(self.unclosed)
             raise interruption from None
@@ -304,8 +322,12 @@ def _parent_path(directory):
 
 
 def _open_directory(resources, path, *, dir_fd=None):
-    fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dir_fd)
-    return resources.keep(_Directory(fd))
+    # The descriptor's original wrapper is owned before it acquires anything.
+    owner = resources.keep(_Directory(None))
+    owner.resource.fd = os.open(
+        path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dir_fd
+    )
+    return owner
 
 
 def _stat(directory, name):
@@ -324,14 +346,16 @@ def _file(info, maximum, phase):
         raise WorkflowBridgeIOError("invalid", phase)
 
 
-def _open_file(directory, name, mode):
+def _open_file(directory, name, mode, *, owner):
     def opener(path, flags):
         return os.open(
             path, flags | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600, dir_fd=directory.resource.fd
         )
 
-    # Original unbuffered FileIO: close cannot retry buffered payload after flush failure.
-    return open(name, mode, buffering=0, opener=opener)
+    # Initialize the already retained original, without a buffered payload.
+    file = owner.resource
+    file.__init__(name, mode, opener=opener)
+    return file
 
 
 def _match_file(directory, name, owner, initial, maximum, phase):
@@ -345,7 +369,7 @@ def _match_file(directory, name, owner, initial, maximum, phase):
 
 def _write_file(resources, directory, name, raw):
     resources.phase = "create"
-    owner = resources.keep(_open_file(directory, name, "xb"))
+    owner = resources.open_file(directory, name, "xb")
     info = _stat(directory, name)
     _match_file(directory, name, owner, info, len(raw), "create")
     if info.st_size != 0:
@@ -503,7 +527,7 @@ def reopen_workflow_bridge(
             _file(infos[name], cap, "reopen")
         readers = {}
         for name, cap in zip(_NAMES, caps):
-            owner = resources.keep(_open_file(leaf, name, "rb"))
+            owner = resources.open_file(leaf, name, "rb")
             readers[name] = owner
             _match_file(leaf, name, owner, infos[name], cap, "reopen")
         complete = _read_file(

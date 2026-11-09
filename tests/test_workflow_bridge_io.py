@@ -1,6 +1,7 @@
 """Real local-file controls, runnable with stdlib unittest and no plugins."""
 
 import gc
+import inspect
 import json
 import os
 import stat
@@ -36,6 +37,14 @@ from review_boundary.workflow_world import (
 )
 
 INERT = "__import__('os').system('touch never-execute-this-note')"
+
+
+def source_line(function, statement):
+    lines, first = inspect.getsourcelines(function)
+    matches = [first + index for index, line in enumerate(lines) if line.strip() == statement]
+    if len(matches) != 1:
+        raise AssertionError("ambiguous current Source boundary")
+    return matches[0]
 
 
 def producer(case, binding, limits, guard="on", notes=None, *, submit=True):
@@ -75,6 +84,7 @@ class Witness:
         self.interrupt = interrupt
         self.short, self.truncated, self.trailing = short, truncated, trailing
         self.events, self.files, self.originals = [], [], []
+        self.original_calls = []
         self.failed = False
         self.directory_syncs = 0
         self.open_file = bridge._open_file
@@ -88,10 +98,10 @@ class Witness:
                 raise KeyboardInterrupt()
             raise OSError("DO_NOT_EXPOSE_PRIVATE_ERROR")
 
-    def open(self, directory, name, mode):
+    def open(self, directory, name, mode, *, owner):
         label = name + ":" + mode
         self.hit(label, "open", "before")
-        file = self.open_file(directory, name, mode)
+        file = owner.resource
         self.files.append((label, file))
         original = {key: getattr(file, key) for key in ("write", "read", "flush", "close")}
         self.originals.append((file, original))
@@ -122,14 +132,16 @@ class Witness:
                         mutator.write(b"x")
             if key == "write" and self.short and not self.failed:
                 self.failed = True
-                result = original[key](args[0][:7])
-            else:
-                result = original[key](*args)
+                args = (args[0][:7],)
+            self.original_calls.append((label, event, "call"))
+            result = original[key](*args)
+            self.original_calls.append((label, event, "return"))
             self.hit(label, event, "after")
             return result
 
         for key in original:
             setattr(file, key, lambda *args, key=key: operation(key, *args))
+        self.open_file(directory, name, mode, owner=owner)
         return file
 
     def sync(self, fd):
@@ -170,6 +182,88 @@ class Witness:
                 setattr(file, key, function)
             if not file.closed:
                 original["close"]()
+
+
+class TraceWitness(Witness):
+    """One deterministic trace injection plus real original-operation evidence."""
+
+    def __init__(
+        self, function, statement=None, *, event="line", failure=KeyboardInterrupt, fault=None
+    ):
+        super().__init__(fault, interrupt=True)
+        self.function, self.event, self.failure = function, event, failure
+        self.line = source_line(function, statement) if statement else None
+        self.fired, self.directories = [], []
+        self.prior = sys.gettrace()
+
+    def __enter__(self):
+        super().__enter__()
+        original = bridge._Directory.close
+
+        def close(resource):
+            self.directories.append(resource)
+            original(resource)
+
+        self.directory_patch = patch.object(bridge._Directory, "close", close)
+        self.directory_patch.start()
+        return self
+
+    def arm(self, predicate):
+        self.predicate = predicate
+        sys.settrace(self.trace)
+
+    def trace(self, frame, event, _argument):
+        if (
+            frame.f_code is self.function.__code__
+            and event == self.event
+            and not self.fired
+            and (self.line is None or frame.f_lineno == self.line)
+            and self.predicate(frame.f_locals)
+        ):
+            owner = frame.f_locals.get("owner")
+            resource = owner.resource if owner else frame.f_locals.get("resource")
+            acquired = (
+                resource.fd is not None
+                if isinstance(resource, bridge._Directory)
+                else resource is not None and not resource.closed
+            )
+            self.fired.append({"event": event, "line": frame.f_lineno, "acquired": acquired})
+            raise self.failure()
+        return self.trace
+
+    def __exit__(self, *args):
+        sys.settrace(self.prior)
+        self.directory_patch.stop()
+        super().__exit__(*args)
+
+    def record(self, label, error):
+        custody = getattr(error, "_workflow_bridge_unclosed", getattr(error, "_unclosed", ()))
+        files = [
+            {
+                "label": label,
+                "closed_after_product": file.closed,
+                "actual_close_calls": self.original_calls.count((label, "close", "call")),
+                "retained_by_identity": any(resource is file for resource in custody),
+            }
+            for label, file in self.files
+        ]
+        if len({id(resource) for resource in self.directories}) != len(self.directories):
+            raise AssertionError("original directory close retried")
+        row = {
+            "control": label,
+            "injection": self.fired,
+            "files": files,
+            "original_operation_order": self.original_calls,
+            "directory_close_calls": len(self.directories),
+            "custody_count": len(custody),
+            "interruption": isinstance(error, KeyboardInterrupt),
+            "test_caller_close_calls": sum(not file.closed for _, file in self.files),
+        }
+        self.retire_custody()
+        if not all(file.closed for _, file in self.files):
+            raise AssertionError("test caller cleanup failed")
+        row["all_originals_closed_after_test_caller_cleanup"] = True
+        print(json.dumps(row, sort_keys=True))
 
 
 class WorkflowBridgeIOTests(unittest.TestCase):
@@ -789,8 +883,8 @@ class WorkflowBridgeIOTests(unittest.TestCase):
         witness = Witness()
         real_open = witness.open
 
-        def replace_after_open(directory, name, mode):
-            file = real_open(directory, name, mode)
+        def replace_after_open(directory, name, mode, *, owner):
+            file = real_open(directory, name, mode, owner=owner)
             if name == "producer.json":
                 target = self.directory / name
                 target.rename(self.parent / "retained-original-producer")
@@ -924,6 +1018,238 @@ class WorkflowBridgeIOTests(unittest.TestCase):
         invalid_snapshot = self.snapshot.model_copy(update={"repository_json": "x" * 2097153})
         self.error(lambda: self.write(producer_snapshot=invalid_snapshot), "invalid", "validate")
         self.assertFalse(self.directory.exists())
+
+    def test_real_close_bookkeeping_line_boundaries(self):
+        # Current imported ownership logic, real acquired originals, no OS signal.
+        cases = (
+            ("baseline", None, "explicit", 1, False),
+            ("before_phase", 'self.phase = "close"', "explicit", 1, False),
+            ("before_original", "owner.resource.close()", "explicit", 0, True),
+            ("after_original", "owner.closed = True", "explicit", 1, True),
+            ("cleanup_before_attempt", 'self.phase = "close"', "cleanup", 0, True),
+            ("cleanup_before_original", "owner.resource.close()", "cleanup", 0, True),
+            ("callee_before", None, "callee_before", 0, True),
+            ("callee_after", None, "callee_after", 1, True),
+            ("cleanup_return_error", None, "cleanup_return", 1, False),
+        )
+        for label, statement, route, calls, retained in cases:
+            with self.subTest(boundary=label):
+                name = label + "-target"
+                fault = (
+                    (name + ":xb", "close", route.removeprefix("callee_"))
+                    if route.startswith("callee_")
+                    else None
+                )
+                witness = TraceWitness(
+                    bridge._Resources.close,
+                    statement,
+                    event="return" if route == "cleanup_return" else "line",
+                    failure=OSError if route == "cleanup_return" else KeyboardInterrupt,
+                    fault=fault,
+                )
+                self.addCleanup(witness.retire_custody)
+                error, returned = None, False
+                with witness:
+                    try:
+                        with bridge._Resources("write") as resources:
+                            directory = bridge._open_directory(resources, self.parent)
+                            independent = resources.open_file(
+                                directory, label + "-independent", "xb"
+                            )
+                            target = resources.open_file(directory, name, "xb")
+                            if statement or route == "cleanup_return":
+                                witness.arm(
+                                    lambda values, target=target: values.get("owner") is target
+                                )
+                            if route == "explicit" or route.startswith("callee_"):
+                                resources.close(target)
+                        returned = True
+                    except (KeyboardInterrupt, bridge.WorkflowBridgeIOError) as caught:
+                        error = caught
+                self.assertEqual(returned, label == "baseline")
+                if label != "baseline":
+                    expected = (
+                        bridge.WorkflowBridgeIOError
+                        if route == "cleanup_return"
+                        else KeyboardInterrupt
+                    )
+                    self.assertIsInstance(error, expected)
+                    if route == "cleanup_return":
+                        self.assertEqual((error.code, error.phase), ("io_unknown", "close"))
+                if statement or route == "cleanup_return":
+                    self.assertEqual(len(witness.fired), 1)
+                custody = getattr(
+                    error, "_workflow_bridge_unclosed", getattr(error, "_unclosed", ())
+                )
+                self.assertEqual(any(item is target.resource for item in custody), retained)
+                self.assertEqual(
+                    witness.original_calls.count((name + ":xb", "close", "call")), calls
+                )
+                self.assertEqual(
+                    witness.original_calls.count((label + "-independent:xb", "close", "call")), 1
+                )
+                self.assertTrue(independent.resource.closed)
+                self.assertEqual(len(witness.directories), 1)
+                self.assertTrue(resources.owned[0].closed)
+                if retained:
+                    self.assertFalse(target.closed)
+                if label == "cleanup_before_attempt":
+                    self.assertFalse(target.attempted)
+                witness.record("close_transition:" + label, error)
+
+    def test_public_acquisition_and_registration_interruption_boundaries(self):
+        cases = (
+            (
+                "file_registration",
+                "write",
+                bridge._Resources.keep,
+                "self.owned.append(owner)",
+                "line",
+            ),
+            (
+                "file_before_init",
+                "write",
+                bridge._open_file,
+                "file.__init__(name, mode, opener=opener)",
+                "line",
+            ),
+            ("file_helper_return", "write", bridge._open_file, None, "return"),
+            ("file_owner_return", "write", bridge._Resources.open_file, "return owner", "line"),
+            ("directory_registered", "write", bridge._Resources.keep, "return owner", "line"),
+            ("directory_acquired", "write", bridge._open_directory, "return owner", "line"),
+            ("reader_helper_return", "read", bridge._open_file, None, "return"),
+            ("reader_directory_return", "read", bridge._open_directory, None, "return"),
+        )
+        for label, operation, function, statement, event in cases:
+            with self.subTest(boundary=label):
+                directory = self.parent / label
+                if operation == "read":
+                    self.write(directory)
+
+                def selected(
+                    values, function=function, label=label, directory=directory, operation=operation
+                ):
+                    if function is bridge._Resources.keep:
+                        return isinstance(values["resource"], bridge._Directory) == (
+                            label == "directory_registered"
+                        )
+                    if function is bridge._open_directory:
+                        return values["path"] == (
+                            directory.name if operation == "write" else directory
+                        )
+                    return values["name"] == (
+                        "producer.json" if operation == "write" else "complete.json"
+                    )
+
+                witness = TraceWitness(function, statement, event=event)
+                self.addCleanup(witness.retire_custody)
+                with witness, self.assertRaises(KeyboardInterrupt) as raised:
+                    witness.arm(selected)
+                    if operation == "write":
+                        self.write(directory)
+                    else:
+                        bridge.reopen_workflow_bridge(directory, **self.arguments())
+                self.assertEqual(len(witness.fired), 1)
+                self.assertEqual(raised.exception._workflow_bridge_unclosed, ())
+                witness.assert_disposition(self, raised.exception)
+                if label in (
+                    "file_helper_return",
+                    "file_owner_return",
+                    "directory_acquired",
+                    "reader_helper_return",
+                    "reader_directory_return",
+                ):
+                    self.assertTrue(witness.fired[0]["acquired"])
+                if directory.exists():
+                    before = {
+                        p.name: (p.stat().st_ino, p.read_bytes()) for p in directory.iterdir()
+                    }
+                    self.error(
+                        lambda directory=directory: self.write(directory), "exists", "create"
+                    )
+                    self.assertEqual(
+                        before,
+                        {p.name: (p.stat().st_ino, p.read_bytes()) for p in directory.iterdir()},
+                    )
+                witness.record("acquisition_transition:" + label, raised.exception)
+
+    def test_exact_reachable_whole_envelope_bound_from_real_core(self):
+        binding = WorkflowRunBinding(run_id="b" * 32, reviewer=chr(1) * 128, epoch=10)
+        args = {"binding": binding, "guard": "off", "limits": self.limits}
+        for kind, maximum in (("memory", 15668), ("handoff", 15669)):
+            with self.subTest(kind=kind):
+                case = self.select(kind)
+                directory = self.parent / ("maximum-" + kind)
+                world = WorkflowSessionWorld(case, 0, **args)
+                world.record_tool_delivery(workflow_tool_schemas(case, 0))
+                world.dispatch("read_work_item", {})
+                world.dispatch("read_pr", {})
+                tool = "remember_note" if kind == "memory" else "write_handoff"
+                for _ in range(6):
+                    self.assertEqual(world.dispatch(tool, {"text": "x" * 2048})["status"], "ok")
+                self.assertEqual(len(canonical_bytes(["x" * 2048] * 6 + ["x" * 2027])), 14337)
+                refusal = world.dispatch(tool, {"text": "x" * 2027})
+                self.assertEqual(refusal, {"status": "error", "error": "note_limit"})
+                self.assertFalse(directory.exists())
+                self.assertEqual(world.dispatch(tool, {"text": "x" * 2026})["status"], "ok")
+                self.assertEqual(
+                    world.dispatch("submit_review", {"verdict": "approve", "findings": []})[
+                        "status"
+                    ],
+                    "ok",
+                )
+                snapshot = checked(WorkflowSnapshot, world.snapshot())
+                replay = replay_workflow(
+                    case,
+                    (snapshot,),
+                    expected_guard="off",
+                    expected_binding=binding,
+                    expected_limits=self.limits,
+                )
+                self.assertEqual(
+                    (replay.request_replay_complete, replay.snapshots[0]), (True, snapshot)
+                )
+                raw = seal_workflow_bridge(case, snapshot, **args)
+                sizes = {
+                    "kind": kind,
+                    "payload": len(canonical_bytes(list(snapshot.notes))),
+                    "binding": len(canonical_bytes(binding)),
+                    "seal": len(raw),
+                    "case": len(canonical_bytes(case)),
+                    "snapshot": len(canonical_bytes(snapshot)),
+                    "calls": snapshot.calls,
+                    "arguments": max(
+                        len(event.arguments_json.encode()) for event in snapshot.events
+                    ),
+                }
+                self.assertEqual(
+                    (sizes["payload"], sizes["binding"], sizes["seal"]), (14336, 838, maximum)
+                )
+                for name, cap in (
+                    ("case", 131072),
+                    ("snapshot", self.limits.max_trace_bytes),
+                    ("calls", self.limits.max_calls),
+                    ("arguments", 65536),
+                    ("seal", 16384),
+                ):
+                    self.assertLessEqual(sizes[name], cap)
+                self.assertFalse(directory.exists())
+                result = self.write(directory, case=case, producer_snapshot=snapshot, **args)
+                self.assertEqual(
+                    (result.raw_bridge, (directory / "bridge.json").read_bytes()), (raw, raw)
+                )
+                print(
+                    json.dumps(
+                        {
+                            "control": "reachable_envelope",
+                            "sizes": sizes,
+                            "seal_sha256": byte_digest(raw),
+                            "extra_byte_refusal": refusal,
+                            "real_replay_write_reopen": True,
+                        },
+                        sort_keys=True,
+                    )
+                )
 
 
 if __name__ == "__main__":
