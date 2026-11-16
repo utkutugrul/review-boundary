@@ -183,6 +183,11 @@ def authenticated_identity(
     )
 
 
+# Failed construction has no caller-owned return value. Keep the actual owner
+# recoverable until operator reconciliation; never infer retirement from an attempt.
+_UNRETIRED_CONSTRUCTORS: list[IntakeStore] = []
+
+
 class IntakeStore:
     """Dedicated private namespace and durable session fence around unchanged enqueue.
 
@@ -211,8 +216,14 @@ class IntakeStore:
             self._database_identity = (info.st_dev, info.st_ino)
         except BaseException as error:
             self.poisoned = True
-            self._release()
-            self._closed = True
+            try:
+                self._release()
+            except BaseException:  # noqa: BLE001
+                # Cleanup must neither replace the construction outcome nor lose
+                # custody of a connection whose close has not been confirmed.
+                _UNRETIRED_CONSTRUCTORS.append(self)
+            else:
+                self._closed = True
             if isinstance(error, StoreError) and error.code == "busy":
                 raise IntakeError("busy") from None
             if isinstance(error, Exception):
@@ -431,18 +442,17 @@ class IntakeStore:
             raise
 
     def _release(self, *, database: bool = True) -> None:
+        if database and self._db is not None:
+            # Only a returned close permits release of the original descriptors.
+            self._db.close()
         try:
-            if database and self._db is not None:
-                self._db.close()
+            if self._lock_fd is not None:
+                os.close(self._lock_fd)
+                self._lock_fd = None
         finally:
-            try:
-                if self._lock_fd is not None:
-                    os.close(self._lock_fd)
-                    self._lock_fd = None
-            finally:
-                if self._dir_fd is not None:
-                    os.close(self._dir_fd)
-                    self._dir_fd = None
+            if self._dir_fd is not None:
+                os.close(self._dir_fd)
+                self._dir_fd = None
 
     def close(self) -> None:
         if self._closed:

@@ -546,6 +546,148 @@ class StorageTests(Scratch):
         )
         self.error("reconciliation_required", intake.IntakeStore, self.directory)
 
+    def constructor_unwind(self, primary, cleanup_error):
+        import fcntl
+
+        # Own the actual partial owner before __init__, and capture the real
+        # JobStore/connection before the sole post-JobStore lstat injection.
+        owner = intake.IntakeStore.__new__(intake.IntakeStore)
+        real_store = intake.JobStore
+        original_close = real_store.close
+        original_lstat = Path.lstat
+        captured = []
+        close_attempts = []
+        original_calls = []
+        injected = []
+        descriptors = []
+        descriptor_identities = []
+        contender = None
+        retired = False
+
+        def open_store(*args, **kwargs):
+            database = real_store(*args, **kwargs)
+            captured.append((database, database._db))
+            descriptors.extend((owner._lock_fd, owner._dir_fd))
+            descriptor_identities.extend(
+                (os.fstat(fd).st_dev, os.fstat(fd).st_ino) for fd in descriptors
+            )
+            return database
+
+        def lstat(path, *args, **kwargs):
+            if path == self.directory / intake.DATABASE and captured and not injected:
+                injected.append(path)
+                raise primary
+            return original_lstat(path, *args, **kwargs)
+
+        def close(database):
+            close_attempts.append(database)
+            if cleanup_error is not None:
+                raise cleanup_error
+            original_calls.append(database)
+            original_close(database)
+
+        try:
+            with (
+                patch.object(intake, "JobStore", side_effect=open_store),
+                patch.object(Path, "lstat", new=lstat),
+                patch.object(real_store, "close", new=close),
+            ):
+                expected = intake.IntakeError if isinstance(primary, Exception) else type(primary)
+                with self.assertRaises(expected) as caught:
+                    owner.__init__(self.directory)
+            # All hooks are restored before physical checks and caller retirement.
+            if isinstance(primary, Exception):
+                self.assertEqual(caught.exception.code, "configuration_refused")
+            else:
+                self.assertIs(caught.exception, primary)
+            self.assertEqual(injected, [self.directory / intake.DATABASE])
+            self.assertEqual(len(captured), 1)
+            database, connection = captured[0]
+            self.assertIs(owner._db, database)
+            self.assertEqual(close_attempts, [database])
+            self.assertTrue(owner.poisoned)
+            self.assertEqual(
+                json.loads((self.directory / intake.MARKER).read_bytes())["state"], "active"
+            )
+            self.assertTrue((self.directory / intake.SESSION).is_file())
+            if cleanup_error is None:
+                for fd in descriptors:
+                    with self.assertRaises(OSError):
+                        os.fstat(fd)
+            contender = os.open(self.directory / intake.LOCK, os.O_RDWR | os.O_NOFOLLOW)
+            lock_info = os.fstat(contender)
+            path_info = (self.directory / intake.LOCK).lstat()
+            self.assertEqual(
+                (lock_info.st_dev, lock_info.st_ino), (path_info.st_dev, path_info.st_ino)
+            )
+            self.assertEqual((lock_info.st_dev, lock_info.st_ino), descriptor_identities[0])
+            if cleanup_error is None:
+                self.assertEqual(original_calls, [database])
+                with self.assertRaises(sqlite3.ProgrammingError):
+                    connection.execute("SELECT 1")
+                self.assertIsNone(owner._lock_fd)
+                self.assertIsNone(owner._dir_fd)
+                self.assertTrue(owner._closed)
+                self.assertNotIn(owner, intake._UNRETIRED_CONSTRUCTORS)
+                fcntl.flock(contender, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                fcntl.flock(contender, fcntl.LOCK_UN)
+                retired = True
+            else:
+                self.assertEqual(original_calls, [])
+                self.assertEqual(connection.execute("SELECT 1").fetchone()[0], 1)
+                self.assertEqual([owner._lock_fd, owner._dir_fd], descriptors)
+                original_info = os.fstat(owner._lock_fd)
+                self.assertEqual(
+                    (original_info.st_dev, original_info.st_ino),
+                    (lock_info.st_dev, lock_info.st_ino),
+                )
+                directory_info = os.fstat(owner._dir_fd)
+                self.assertEqual(
+                    (directory_info.st_dev, directory_info.st_ino), descriptor_identities[1]
+                )
+                self.assertFalse(owner._closed)
+                self.assertIn(owner, intake._UNRETIRED_CONSTRUCTORS)
+                with self.assertRaises(BlockingIOError):
+                    fcntl.flock(contender, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        finally:
+            # Test-only retirement is justified by the controlled fact that the
+            # saved original close never ran. No production retry/adoption path.
+            try:
+                if captured and not original_calls:
+                    original_calls.append(captured[0][0])
+                    original_close(captured[0][0])
+                    retired = True
+                    owner._release(database=False)
+                    owner._closed = True
+                    if owner in intake._UNRETIRED_CONSTRUCTORS:
+                        intake._UNRETIRED_CONSTRUCTORS.remove(owner)
+            finally:
+                if contender is not None:
+                    os.close(contender)
+        self.assertTrue(retired)
+        self.assertEqual(original_calls, [captured[0][0]])
+        with self.assertRaises(sqlite3.ProgrammingError):
+            captured[0][1].execute("SELECT 1")
+        for fd in descriptors:
+            with self.assertRaises(OSError):
+                os.fstat(fd)
+        self.error("reconciliation_required", intake.IntakeStore, self.directory)
+
+    def test_constructor_confirmed_close_releases_real_resources_keeps_fence_and_primary(self):
+        for index, primary in enumerate((OSError("synthetic lstat"), asyncio.CancelledError())):
+            with self.subTest(primary=type(primary).__name__):
+                self.directory = self.root / f"confirmed-{index}"
+                self.constructor_unwind(primary, None)
+
+    def test_constructor_uncertain_close_retains_real_resources_keeps_fence_and_primary(self):
+        for index, primary in enumerate((OSError("synthetic lstat"), asyncio.CancelledError())):
+            for cleanup_error in (OSError("before original close"), KeyboardInterrupt()):
+                with self.subTest(
+                    primary=type(primary).__name__, cleanup=type(cleanup_error).__name__
+                ):
+                    self.directory = self.root / f"uncertain-{index}-{type(cleanup_error).__name__}"
+                    self.constructor_unwind(primary, cleanup_error)
+
     def test_failed_clean_publication_and_failed_unknown_update_keep_session_fence(self):
         store = self.store()
         store.retain(identity())

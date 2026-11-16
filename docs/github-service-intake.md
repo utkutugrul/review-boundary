@@ -143,6 +143,15 @@ handler installation can leave an unclean fence; it still requires operator
 reconciliation. No reset command is added. If SQLite close fails, the connection
 and cooperative lock remain owned until a later explicit close confirms closure;
 that cleanup does not reopen the database or retry an intake write.
+During constructor unwind, a failed SQLite close also keeps the actual partial
+owner strongly referenced in the module's private `_UNRETIRED_CONSTRUCTORS`
+collection, with its original connection, flock and directory descriptors.
+The original construction refusal or cancellation remains primary. No automatic
+cleanup retry or clean-close certification follows; the durable active fence
+remains. The collection records unresolved process resources for operator
+reconciliation and grants no restart, adoption or execution authority. A confirmed
+constructor cleanup closes the database before releasing those descriptors and
+still leaves the conservative active fence.
 The CLI refuses an unrestorable non-Python signal handler before installation,
 records only successfully installed handlers and attempts every owned restore.
 Any failed restore reports uncertainty instead of successful cleanup.
