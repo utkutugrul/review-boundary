@@ -163,15 +163,21 @@ and session unlink may already have returned: release uncertainty does not
 promise a retained active fence or certify clean overall shutdown.
 
 Ordinary secondary cleanup errors preserve an existing primary outcome. Without
-a primary they become fixed `outcome_unknown`. An active non-Exception
+a primary they become fixed `outcome_unknown`. An active non-`Exception`
 cancellation stays primary; a new cleanup cancellation supersedes an ordinary
 primary with that original error retained as context. Selected exceptions retain
-their existing explicit cause and suppression. An unchained new cancellation
-uses the prior selected outcome as its cause; existing explicit chains take
-precedence, with the prior outcome retained through implicit context. If the
-stopped future resolves normally, a later restoration cancellation retains the
-selected close outcome and its actual underlying close failure, including that
-failure's explicit chain. Absence is checked with `None`, even for falsey errors.
+their existing explicit cause and suppression. In `IntakeStore.close()`, when
+there was no caller primary and an ordinary storage or marker failure is followed
+by a new cleanup cancellation, the original raw failure is retained as its cause
+unless an existing explicit chain takes precedence; that chain is preserved and
+the prior raw failure remains available through implicit context. This path does
+not promise retention of an intermediate normalized `outcome_unknown` wrapper.
+In `_serve`, an unchained restoration cancellation instead retains the prior
+selected close outcome as its cause. If the stopped future resolves normally,
+that selected close category and its actual underlying close failure remain
+retrievable, including the failure's explicit chain. Existing explicit chains
+take precedence, with the prior selected outcome retained through implicit
+context. Absence is checked with `None`, even for falsey errors.
 Constructor priority and
 custody remain unchanged. Signal cleanup independently attempts loop removal
 and Python restoration for each owned signal and reports fixed uncertainty on
