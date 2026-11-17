@@ -152,6 +152,34 @@ remains. The collection records unresolved process resources for operator
 reconciliation and grants no restart, adoption or execution authority. A confirmed
 constructor cleanup closes the database before releasing those descriptors and
 still leaves the conservative active fence.
+Normal close records confirmed database closure separately from logical intake
+closure. Each lock/directory close is attempted independently. A returned close
+confirms that component; an exception leaves its retirement unknown, even when
+the kernel may already have closed it. The actual owner stays strongly retained
+in `_UNRETIRED_CLOSES`. Saved descriptor numbers grant no retry or adoption
+capability. Repeated close refuses with `outcome_unknown` without another
+descriptor operation or another confirmed database close. Marker publication
+and session unlink may already have returned: release uncertainty does not
+promise a retained active fence or certify clean overall shutdown.
+
+Ordinary secondary cleanup errors preserve an existing primary outcome. Without
+a primary they become fixed `outcome_unknown`. An active non-Exception
+cancellation stays primary; a new cleanup cancellation supersedes an ordinary
+primary with that original error retained as context. Selected exceptions retain
+their existing explicit cause and suppression. An unchained new cancellation
+uses the prior selected outcome as its cause; existing explicit chains take
+precedence, with the prior outcome retained through implicit context. If the
+stopped future resolves normally, a later restoration cancellation retains the
+selected close outcome and its actual underlying close failure, including that
+failure's explicit chain. Absence is checked with `None`, even for falsey errors.
+Constructor priority and
+custody remain unchanged. Signal cleanup independently attempts loop removal
+and Python restoration for each owned signal and reports fixed uncertainty on
+ordinary failures. An exception alone does not establish actual handler state.
+Termination before handler installation can leave an unclean session requiring
+operator reconciliation. This conservative startup limitation remains; no
+startup order or signal disposition guarantee is added.
+
 The CLI refuses an unrestorable non-Python signal handler before installation,
 records only successfully installed handlers and attempts every owned restore.
 Any failed restore reports uncertainty instead of successful cleanup.

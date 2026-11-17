@@ -11,6 +11,7 @@ import os
 import re
 import signal
 import stat
+import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -186,6 +187,15 @@ def authenticated_identity(
 # Failed construction has no caller-owned return value. Keep the actual owner
 # recoverable until operator reconciliation; never infer retirement from an attempt.
 _UNRETIRED_CONSTRUCTORS: list[IntakeStore] = []
+_UNRETIRED_CLOSES: list[IntakeStore] = []
+
+
+def _cleanup_outcome(primary: BaseException | None, error: BaseException) -> BaseException:
+    if primary is not None and not isinstance(primary, Exception):
+        return primary
+    if not isinstance(error, Exception):
+        return error
+    return primary if primary is not None else IntakeError("outcome_unknown")
 
 
 class IntakeStore:
@@ -203,6 +213,9 @@ class IntakeStore:
         self._marker_raw = None
         self._marker_identity = None
         self._closed = False
+        self._database_closed = False
+        self._descriptor_retirement = {"_lock_fd": "unattempted", "_dir_fd": "unattempted"}
+        self._cleanup_unknown = False
         self.poisoned = False
         self.refusal = "outcome_unknown"
         self._session = os.urandom(16).hex()
@@ -445,41 +458,77 @@ class IntakeStore:
         if database and self._db is not None:
             # Only a returned close permits release of the original descriptors.
             self._db.close()
-        try:
-            if self._lock_fd is not None:
-                os.close(self._lock_fd)
-                self._lock_fd = None
-        finally:
-            if self._dir_fd is not None:
-                os.close(self._dir_fd)
-                self._dir_fd = None
+            self._database_closed = True
+        outcome = None
+        for name in ("_lock_fd", "_dir_fd"):
+            if self._descriptor_retirement[name] == "unknown":
+                outcome = _cleanup_outcome(outcome, IntakeError("outcome_unknown"))
+                continue
+            fd = getattr(self, name)
+            if fd is None:
+                continue
+            # Saved numbers in unknown records confer no operating capability.
+            self._descriptor_retirement[name] = "unknown"
+            try:
+                os.close(fd)
+            except BaseException as error:  # noqa: BLE001
+                # Collect independent attempts, then propagate cancellation.
+                outcome = _cleanup_outcome(outcome, error)
+            else:
+                self._descriptor_retirement[name] = "confirmed"
+                setattr(self, name, None)
+        if outcome is not None:
+            raise outcome
 
     def close(self) -> None:
         if self._closed:
+            if self._cleanup_unknown:
+                raise _cleanup_outcome(sys.exception(), IntakeError("outcome_unknown"))
             return
+        primary = sys.exception()
+        context = primary
+        outcome = None
         database_closed = False
         try:
             if self._db is not None:
                 self._db.close()
             database_closed = True
+            self._database_closed = True
             if not self.poisoned:
                 self._write_marker("clean")
                 self._ownership()
                 # Last namespace mutation, only after known DB close and durable clean.
                 # No fsync after unlink: loss of this deletion only refuses restart.
                 os.unlink(self.directory / SESSION)
-        except Exception:  # noqa: BLE001
-            self._poison()
-            raise IntakeError("outcome_unknown") from None
-        except BaseException:
-            self._poison()
-            raise
+        except BaseException as error:  # noqa: BLE001
+            context = primary if primary is not None else error
+            outcome = _cleanup_outcome(primary, error)
+            try:
+                self._poison()
+            except BaseException as cleanup:  # noqa: BLE001
+                outcome = _cleanup_outcome(outcome, cleanup)
         finally:
             if database_closed:
                 self._closed = True
-                self._release(database=False)
+                try:
+                    self._release(database=False)
+                except BaseException as error:  # noqa: BLE001
+                    self._cleanup_unknown = True
+                    self.poisoned = True
+                    _UNRETIRED_CLOSES.append(self)
+                    outcome = _cleanup_outcome(outcome if outcome is not None else primary, error)
             # Failed close retains the SQLite handle and cooperative lock. An
             # explicit later close may release custody, never retry an intake.
+        if outcome is not None:
+            if (
+                context is not None
+                and outcome is not context
+                and not isinstance(outcome, Exception)
+            ):
+                if outcome.__cause__ is None and not outcome.__suppress_context__:
+                    raise outcome from context
+                outcome.__context__ = context
+            raise outcome
 
 
 def _response(code: str) -> bytes:
@@ -722,6 +771,9 @@ def _restore_signals(loop: asyncio.AbstractEventLoop, previous: dict) -> None:
     for signum, handler in previous.items():
         try:
             loop.remove_signal_handler(signum)
+        except (OSError, RuntimeError, TypeError, ValueError):
+            failed = True
+        try:
             signal.signal(signum, handler)
         except (OSError, RuntimeError, TypeError, ValueError):
             failed = True
@@ -747,10 +799,31 @@ async def _serve(args: argparse.Namespace, policy: IntakePolicy) -> int:
             previous[signum] = handler
         await owner.stopped
     finally:
+        primary = sys.exception()
+        outcome = None
+        context = primary
         try:
             await owner.close()
+        except BaseException as error:  # noqa: BLE001
+            outcome = _cleanup_outcome(primary, error)
+            if outcome is not primary and outcome is not error:
+                # The fixed category still retains the actual close failure.
+                outcome.__context__ = error
+            context = outcome
         finally:
-            _restore_signals(owner.loop, previous)
+            try:
+                _restore_signals(owner.loop, previous)
+            except BaseException as error:  # noqa: BLE001
+                prior = outcome if outcome is not None else primary
+                outcome = _cleanup_outcome(prior, error)
+                if outcome is not prior:
+                    context = prior if prior is not None else error
+        if outcome is not None:
+            if context is not None and outcome is not context:
+                if outcome.__cause__ is None and not outcome.__suppress_context__:
+                    raise outcome from context
+                outcome.__context__ = context
+            raise outcome
     return int(owner.store.poisoned)
 
 

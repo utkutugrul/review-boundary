@@ -546,6 +546,155 @@ class StorageTests(Scratch):
         )
         self.error("reconciliation_required", intake.IntakeStore, self.directory)
 
+    def test_normal_close_descriptor_faults_preserve_custody_priority_and_physical_facts(self):
+        for component in ("_lock_fd", "_dir_fd"):
+            for after in (False, True):
+                for primary_kind in (None, OSError, asyncio.CancelledError):
+                    for cleanup_kind in (OSError, asyncio.CancelledError, KeyboardInterrupt):
+                        with self.subTest(
+                            component=component,
+                            after=after,
+                            primary=primary_kind,
+                            cleanup=cleanup_kind,
+                        ):
+                            directory = (
+                                self.root
+                                / f"release-{component}-{after}-{primary_kind}-{cleanup_kind}"
+                            )
+                            store = intake.IntakeStore(directory)
+                            descriptors = [store._lock_fd, store._dir_fd]
+                            target = getattr(store, component)
+                            real_close = os.close
+                            primary = primary_kind() if primary_kind else None
+                            cleanup = cleanup_kind()
+                            attempts = []
+
+                            def close(
+                                fd,
+                                descriptors=descriptors,
+                                attempts=attempts,
+                                target=target,
+                                after=after,
+                                real_close=real_close,
+                                cleanup=cleanup,
+                            ):
+                                if fd in descriptors:
+                                    attempts.append(fd)
+                                if fd == target:
+                                    if after:
+                                        real_close(fd)
+                                    raise cleanup
+                                real_close(fd)
+
+                            expected = primary if primary is not None else None
+                            if expected is None or isinstance(expected, Exception):
+                                expected = (
+                                    cleanup if not isinstance(cleanup, Exception) else expected
+                                )
+                            try:
+                                with patch.object(intake.os, "close", side_effect=close):
+                                    with self.assertRaises(BaseException) as caught:
+                                        if primary is None:
+                                            store.close()
+                                        else:
+                                            try:
+                                                raise primary
+                                            except BaseException:  # noqa: BLE001
+                                                store.close()
+                                    if expected is None:
+                                        self.assertIsInstance(caught.exception, intake.IntakeError)
+                                        self.assertEqual(str(caught.exception), "outcome_unknown")
+                                    else:
+                                        self.assertIs(caught.exception, expected)
+                                    if primary is not None and expected is cleanup:
+                                        self.assertIs(caught.exception.__cause__, primary)
+                                    self.assertEqual(attempts, descriptors)
+                                    self.assertTrue(store._database_closed)
+                                    self.assertTrue(store._closed)
+                                    self.assertIn(store, intake._UNRETIRED_CLOSES)
+                                    self.assertEqual(
+                                        store._descriptor_retirement[component], "unknown"
+                                    )
+                                    other = "_dir_fd" if component == "_lock_fd" else "_lock_fd"
+                                    self.assertEqual(
+                                        store._descriptor_retirement[other], "confirmed"
+                                    )
+                                    self.assertIsNone(getattr(store, other))
+                                    self.assertEqual(getattr(store, component), target)
+                                    self.error("outcome_unknown", store.close)
+                                    self.assertEqual(attempts, descriptors)
+                                # Hooks are restored before physical observations and
+                                # retirement of a controlled never-attempted original.
+                                with self.assertRaises(sqlite3.ProgrammingError):
+                                    store._db._db.execute("SELECT 1")
+                                self.assertEqual(
+                                    json.loads((directory / intake.MARKER).read_bytes())["state"],
+                                    "clean",
+                                )
+                                self.assertFalse((directory / intake.SESSION).exists())
+                                for fd in descriptors:
+                                    if fd == target and not after:
+                                        os.fstat(fd)
+                                    else:
+                                        with self.assertRaises(OSError):
+                                            os.fstat(fd)
+                            finally:
+                                if not after:
+                                    # The hook did not call the kernel for this fd.
+                                    real_close(target)
+                                if store in intake._UNRETIRED_CLOSES:
+                                    intake._UNRETIRED_CLOSES.remove(store)
+
+    def test_normal_close_marker_primary_and_new_release_cancellation_keep_context(self):
+        store = intake.IntakeStore(self.directory)
+        original = store._write_marker
+        primary = OSError("controlled clean marker failure")
+        cancellation = asyncio.CancelledError()
+        target = store._lock_fd
+        directory_fd = store._dir_fd
+        real_close = os.close
+        calls = []
+
+        def marker(state):
+            if state == "clean":
+                raise primary
+            original(state)
+
+        def close(fd):
+            if fd in (target, directory_fd):
+                calls.append(fd)
+            if fd == target:
+                raise cancellation
+            real_close(fd)
+
+        try:
+            with (
+                patch.object(store, "_write_marker", side_effect=marker),
+                patch.object(intake.os, "close", side_effect=close),
+                self.assertRaises(asyncio.CancelledError) as caught,
+            ):
+                store.close()
+            self.assertIs(caught.exception, cancellation)
+            self.assertIs(caught.exception.__cause__, primary)
+            self.assertEqual(calls, [target, directory_fd])
+            self.assertTrue(store._database_closed)
+            self.assertTrue(store._closed)
+            with self.assertRaises(sqlite3.ProgrammingError):
+                store._db._db.execute("SELECT 1")
+            self.assertEqual(
+                json.loads((self.directory / intake.MARKER).read_bytes())["state"], "unknown"
+            )
+            self.assertTrue((self.directory / intake.SESSION).exists())
+            self.error("outcome_unknown", store.close)
+            os.fstat(target)
+            with self.assertRaises(OSError):
+                os.fstat(directory_fd)
+        finally:
+            # This controlled close hook never called the original for target.
+            real_close(target)
+            if store in intake._UNRETIRED_CLOSES:
+                intake._UNRETIRED_CLOSES.remove(store)
+
     def constructor_unwind(self, primary, cleanup_error):
         import fcntl
 
@@ -1027,6 +1176,153 @@ class LoopbackTests(unittest.IsolatedAsyncioTestCase):
 
 
 class InertCliTests(unittest.TestCase):
+    def test_close_chains(self):
+        from unittest.mock import Mock
+
+        class Falsey(OSError):
+            def __bool__(self):
+                return False
+
+        for kind in (OSError, Falsey, asyncio.CancelledError, KeyboardInterrupt):
+            for cleanup in (OSError, asyncio.CancelledError, KeyboardInterrupt):
+                for cause, suppress in (
+                    (ValueError(), False),
+                    (ValueError(), True),
+                    (None, True),
+                ):
+                    prior, err = kind(), cleanup()
+                    kept = prior
+                    if isinstance(prior, Exception) and not isinstance(err, Exception):
+                        kept = err
+                    kept.__cause__, kept.__suppress_context__ = cause, suppress
+                    store = Mock(_closed=False)
+                    store._db.close.side_effect = err
+                    with self.assertRaises(BaseException) as caught:
+                        try:
+                            raise prior
+                        except BaseException:  # noqa: BLE001
+                            intake.IntakeStore.close(store)
+                    self.assertIs(caught.exception, kept)
+                    self.assertIs(kept.__cause__, cause)
+                    self.assertEqual(kept.__suppress_context__, suppress)
+
+    def test_stop_close_chain(self):
+        from unittest.mock import AsyncMock, Mock
+
+        class Falsey(asyncio.CancelledError):
+            def __bool__(self):
+                return False
+
+        async def control(kind, later, cause, suppress):
+            err, cancel = kind(), later()
+            origin = ValueError()
+            err.__cause__ = origin
+            cancel.__cause__, cancel.__suppress_context__ = cause, suppress
+            owner = Mock(close=AsyncMock(side_effect=err))
+            owner.stopped = asyncio.get_running_loop().create_future()
+            owner.stopped.set_result(None)
+            args = Mock(secret_file="/synthetic", intake_directory="/synthetic", port=0)
+            with (
+                patch.object(intake, "start_server", AsyncMock(return_value=owner)),
+                patch.object(intake.signal, "getsignal", return_value=signal.SIG_DFL),
+                patch.object(intake, "_restore_signals", side_effect=cancel),
+                self.assertRaises(BaseException) as caught,
+            ):
+                await intake._serve(args, POLICY)
+            self.assertIs(caught.exception, cancel if isinstance(err, Exception) else err)
+            if caught.exception is cancel:
+                prior = cancel.__context__ if cause is not None or suppress else cancel.__cause__
+                self.assertEqual(str(prior), "outcome_unknown")
+                self.assertIs(prior.__context__, err)
+                if cause is not None or suppress:
+                    self.assertIs(cancel.__cause__, cause)
+                    self.assertEqual(cancel.__suppress_context__, suppress)
+            self.assertIs(err.__cause__, origin)
+            self.assertTrue(err.__suppress_context__)
+
+        for kind in (OSError, Falsey, KeyboardInterrupt):
+            for later in (asyncio.CancelledError, KeyboardInterrupt):
+                for cause in (None, ValueError()):
+                    for suppress in (False, True):
+                        asyncio.run(control(kind, later, cause, suppress))
+
+    def test_serve_cleanup_priority_when_close_and_handler_restore_fail(self):
+        from unittest.mock import AsyncMock, Mock
+
+        async def control(primary, close_error, restore_error):
+            owner = Mock()
+            owner.stopped = asyncio.get_running_loop().create_future()
+            owner.stopped.set_exception(primary)
+            owner.close = AsyncMock(side_effect=close_error)
+            args = argparse.Namespace(
+                secret_file="/synthetic", intake_directory="/synthetic", port=0
+            )
+            with (
+                patch.object(intake, "start_server", AsyncMock(return_value=owner)),
+                patch.object(intake.signal, "getsignal", return_value=signal.SIG_DFL),
+                patch.object(intake, "_restore_signals", side_effect=restore_error) as restore,
+                self.assertRaises(BaseException) as caught,
+            ):
+                await intake._serve(args, POLICY)
+            expected = primary
+            for error in (close_error, restore_error):
+                if isinstance(expected, Exception) and not isinstance(error, Exception):
+                    expected = error
+            self.assertIs(caught.exception, expected)
+            owner.close.assert_awaited_once()
+            restore.assert_called_once_with(
+                owner.loop,
+                {
+                    signal.SIGTERM: signal.SIG_DFL,
+                    signal.SIGHUP: signal.SIG_DFL,
+                },
+            )
+
+        for primary_kind in (OSError, asyncio.CancelledError):
+            for close_kind in (OSError, asyncio.CancelledError):
+                for restore_kind in (intake.IntakeError, KeyboardInterrupt):
+                    primary = primary_kind()
+                    close_error = close_kind()
+                    restore_error = restore_kind("outcome_unknown")
+                    with self.subTest(primary=primary_kind, close=close_kind, restore=restore_kind):
+                        asyncio.run(control(primary, close_error, restore_error))
+
+    def test_signal_removal_and_restoration_failures_attempt_same_and_later_signal(self):
+        from unittest.mock import Mock
+
+        previous = {signal.SIGTERM: signal.SIG_DFL, signal.SIGHUP: signal.SIG_IGN}
+        for removal, restoration in ((True, False), (False, True), (True, True)):
+            with self.subTest(removal=removal, restoration=restoration):
+                calls = []
+
+                def remove(signum, calls=calls, removal=removal):
+                    calls.append(("remove", signum))
+                    if signum == signal.SIGTERM and removal:
+                        raise OSError("controlled removal")
+
+                def restore(signum, handler, calls=calls, restoration=restoration):
+                    calls.append(("restore", signum, handler))
+                    if signum == signal.SIGTERM and restoration:
+                        raise ValueError("controlled restoration")
+
+                loop = Mock()
+                loop.remove_signal_handler.side_effect = remove
+                with (
+                    patch.object(intake.signal, "signal", side_effect=restore),
+                    self.assertRaises(intake.IntakeError) as caught,
+                ):
+                    intake._restore_signals(loop, previous)
+                self.assertEqual(str(caught.exception), "outcome_unknown")
+                self.assertEqual(
+                    calls,
+                    [
+                        ("remove", signal.SIGTERM),
+                        ("restore", signal.SIGTERM, signal.SIG_DFL),
+                        ("remove", signal.SIGHUP),
+                        ("restore", signal.SIGHUP, signal.SIG_IGN),
+                    ],
+                )
+
     def test_signal_restore_failure_still_attempts_each_owned_handler(self):
         from unittest.mock import Mock
 
