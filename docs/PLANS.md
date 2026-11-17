@@ -36,3 +36,8 @@ The plan-level manual_claims list protects current issue owners; it is separate
 from a Codex/Claude delivery role. Remove a claim only after explicit owner
 handoff. After current owners finish, new work enters through Symphony/GitHub,
 not another manual task cascade. Never assign two writers to one scope.
+
+The active plan keeps current task contracts and links to
+[historical custody evidence](exec-plans/history/symphony-custody-handoffs.md).
+Archived acceptance and tables remain unchanged apart from the relocated manifest
+link. Neither archive placement nor task registration promotes a worker.
