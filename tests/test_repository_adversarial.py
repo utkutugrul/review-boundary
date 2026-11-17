@@ -10,6 +10,7 @@ import os
 import sys
 
 import pytest
+from test_repository_world import missing_reads
 
 from review_boundary.cli import main
 from review_boundary.repository_cases import (
@@ -407,6 +408,119 @@ def test_writes_are_counted_even_after_limit_failure_and_block_structural_pass()
         world.dispatch("write_file", {"path": "bad\\path", "content": "x"})
     assert world.write_requests == 2
     assert score_repository_world(selected, world)["write_attempted"] is True
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "missing_digest",
+        "wrong_digest",
+        "missing_review",
+        "invalid_review",
+        "wrong_limit",
+        "wrong_status",
+        "wrong_tool",
+        "duplicate",
+        "nonterminal",
+        "extra_digest",
+        "mixed",
+        "feasible",
+        "wrong_case",
+        "wrong_limits",
+        "bytes",
+        "calls",
+        "exposure",
+        "writes",
+        "one_extra_write",
+    ],
+)
+def test_failed_submit_restore_rejects_forged_state(mutation):
+    selected = demo()
+    limits = RepositoryLimits(max_total_response_bytes=256)
+    world = RepositoryWorld(selected, limits)
+    missing_reads(world)
+    with pytest.raises(RepositoryLimitError):
+        submit(world, [])
+    state = world.snapshot()
+    event = state["events"][-1]
+    if mutation == "missing_digest":
+        event["review_sha256"] = None
+    elif mutation == "wrong_digest":
+        event["review_sha256"] = "0" * 64
+    elif mutation == "missing_review":
+        state["review"] = None
+    elif mutation == "invalid_review":
+        state["review"]["verdict"] = "comment"
+    elif mutation == "wrong_limit":
+        event["status"] = state["fatal_error"] = "calls"
+    elif mutation == "wrong_status":
+        event["status"] = "error"
+    elif mutation == "wrong_tool":
+        event["tool"] = "unknown"
+    elif mutation == "duplicate":
+        state["events"].append(dict(event))
+        state["calls"] += 1
+    elif mutation == "nonterminal":
+        state["events"].reverse()
+    elif mutation == "extra_digest":
+        state["events"][0]["review_sha256"] = event["review_sha256"]
+    elif mutation == "mixed":
+        state["events"][0].update(
+            tool="submit_review", status="ok", review_sha256=event["review_sha256"]
+        )
+    elif mutation == "feasible":
+        state["limits"]["max_total_response_bytes"] = 260
+        limits = RepositoryLimits(max_total_response_bytes=260)
+    elif mutation == "wrong_case":
+        selected = demo("fixed")
+    elif mutation == "wrong_limits":
+        limits = RepositoryLimits(max_calls=63, max_total_response_bytes=256)
+    elif mutation == "bytes":
+        state["output_bytes"] -= 1
+    elif mutation == "calls":
+        state["calls"] += 1
+    elif mutation == "exposure":
+        state["exposed"] = True
+    elif mutation == "writes":
+        state["write_requests"] = 2
+    elif mutation == "one_extra_write":
+        state["write_requests"] = 1
+    with pytest.raises(ValueError):
+        RepositoryWorld.from_snapshot(selected, state, expected_limits=limits)
+
+
+@pytest.mark.parametrize("kind", ["generic", "invalid", "calls", "already_submitted"])
+def test_other_limits_have_no_failed_submit_witness(kind):
+    selected = demo()
+    world = RepositoryWorld(
+        selected,
+        RepositoryLimits(max_calls=6 if kind == "calls" else 64, max_total_response_bytes=256),
+    )
+    if kind == "already_submitted":
+        acknowledgment = submit(world, [])
+        assert acknowledgment == {"status": "ok", "submitted": True}
+        assert len(json.dumps(acknowledgment, separators=(",", ":")).encode()) == 32
+        for _ in range(4):
+            reply = world.dispatch("read_file", {"path": "absent.txt", "end_line": 1})
+            assert reply == {"status": "error", "error": "already_submitted"}
+            assert len(json.dumps(reply, separators=(",", ":")).encode()) == 46
+        assert world.output_bytes == 216
+    else:
+        missing_reads(world)
+    tool, args = (
+        ("read_file", {"path": "absent.txt", "end_line": 1})
+        if kind == "generic"
+        else ("submit_review", {} if kind == "invalid" else {"verdict": "approve", "findings": []})
+    )
+    with pytest.raises(RepositoryLimitError):
+        world.dispatch(tool, args)
+    assert "review_sha256" not in world.events[-1]
+    restored = RepositoryWorld.from_snapshot(
+        selected, world.snapshot(), expected_limits=world.limits
+    )
+    assert restored.snapshot() == world.snapshot()
+    assert restored.review == (world.review if kind == "already_submitted" else None)
+    assert score_repository_world(selected, restored) == score_repository_world(selected, world)
 
 
 # Exposure accounting for line separators other than a lone newline

@@ -130,6 +130,14 @@ Pagination reports `next_cursor` or `next_line`. Paths must stay inside the
 snapshot. The CLI uses these defaults; `RepositoryLimits` is configurable in
 the Python API. Transport limits apply separately.
 
+V1 keeps schema version 1 and its fields/enums. When a first validated
+submit's acknowledgment exceeds the response budget, its diagnostic review binds
+to `review_sha256` on the final zero-byte `limits`/`response_bytes` event.
+Restore checks the digest and trusted budget; scoring stays incomplete.
+Older readers may refuse this extension. Healthy, successful and
+generic-fatal snapshots remain compatible. Historical unbound reviews stay invalid.
+Callers must stop on limit errors, including after restoration.
+
 Response budgets include encoded JSON overhead. Schema-valid large PR text or
 a heavily escaped source line can exceed the default response cap and terminate
 the invocation. Check that custom cases fit the default tools and budgets before

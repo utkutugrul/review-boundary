@@ -704,6 +704,58 @@ def test_fatal_world_snapshot_round_trip_retains_limit_failure():
     assert not score_repository_world(selected, restored)["completed"]
 
 
+def missing_reads(world, count=6):
+    for _ in range(count):
+        reply = world.dispatch("read_file", {"path": "absent.txt", "end_line": 1})
+        assert len(json.dumps(reply, separators=(",", ":")).encode()) == 38
+
+
+@pytest.mark.parametrize("total", [256, 259, 260])
+@pytest.mark.parametrize("diagnostic", [False, True])
+def test_supported_submit_budget_boundary_roundtrip(total, diagnostic):
+    selected = case()
+    world = RepositoryWorld(selected, RepositoryLimits(max_total_response_bytes=total))
+    missing_reads(world)
+    review = {"verdict": "request_changes", "findings": [finding(selected)] if diagnostic else []}
+    acknowledgment = {"status": "ok", "submitted": True}
+    size = len(json.dumps(acknowledgment, separators=(",", ":")).encode())
+    assert size == 32 and world.output_bytes == 228
+    if total - world.output_bytes < size:
+        with pytest.raises(RepositoryLimitError):
+            world.dispatch("submit_review", review)
+        assert world.events[-1] == {
+            "tool": "limits",
+            "status": "response_bytes",
+            "response_bytes": 0,
+            "review_sha256": review_digest(review),
+        }
+        assert world.output_bytes == 228
+    else:
+        assert world.dispatch("submit_review", review) == acknowledgment
+        assert world.output_bytes == total
+    snapshot = world.snapshot()
+    restored = RepositoryWorld.from_snapshot(selected, snapshot, expected_limits=world.limits)
+    assert restored.snapshot() == snapshot and restored.events == world.events
+    assert restored.review == review and restored.calls == world.calls == 7
+    before = score_repository_world(selected, world)
+    assert score_repository_world(selected, restored) == before
+    if world.fatal_error:
+        assert (before["completed"], before["conclusive"], before["rubric_passed"]) == (False,) * 3
+
+
+def test_failed_submit_post_fatal_write_does_not_repair_counters():
+    world = RepositoryWorld(case(), RepositoryLimits(max_total_response_bytes=256))
+    missing_reads(world)
+    with pytest.raises(RepositoryLimitError):
+        submit(world, [])
+    with pytest.raises(RepositoryLimitError):
+        world.dispatch("write_file", {"path": "x", "content": "x"})
+    assert (world.calls, len(world.events), world.write_requests) == (8, 7, 1)
+    assert world.fatal_error == "response_bytes"
+    with pytest.raises(ValueError, match="exactly one event"):
+        world.snapshot()
+
+
 def test_several_independent_issues_are_counted_separately():
     payload = case().model_dump(mode="json")
     payload["files"].append(

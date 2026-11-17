@@ -1,5 +1,6 @@
 import pytest
 from test_repository_cases_v2 import make_v2
+from test_repository_world import missing_reads
 
 from review_boundary.repository_cases import RepositoryCase, build_repository_demo_cases
 from review_boundary.repository_cases_v2 import RepositoryCaseV2, parse_repository_case
@@ -9,6 +10,7 @@ from review_boundary.repository_runtime import (
     score_repository_case,
 )
 from review_boundary.repository_world import (
+    RepositoryLimitError,
     RepositoryLimits,
     RepositoryWorld,
     score_repository_world,
@@ -67,3 +69,16 @@ def test_v2_facade_never_defaults_missing_snapshot_version_to_v2():
     del snapshot["schema_version"]
     with pytest.raises(ValueError, match="version"):
         restore_repository_world(selected, snapshot, expected_limits=RepositoryLimits())
+
+
+def test_v1_facade_restores_failed_submit():
+    selected = build_repository_demo_cases()[0]
+    world = repository_world_for_case(selected, RepositoryLimits(max_total_response_bytes=256))
+    missing_reads(world)
+    with pytest.raises(RepositoryLimitError):
+        world.dispatch("submit_review", {"verdict": "approve", "findings": []})
+    restored = restore_repository_world(selected, world.snapshot(), expected_limits=world.limits)
+    assert type(restored) is RepositoryWorld and restored.snapshot() == world.snapshot()
+    row = score_repository_case(selected, restored)
+    assert row == score_repository_case(selected, world)
+    assert (row["completed"], row["conclusive"], row["rubric_passed"]) == (False,) * 3

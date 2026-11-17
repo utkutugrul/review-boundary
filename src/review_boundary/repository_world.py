@@ -167,8 +167,12 @@ class RepositoryEvent(FrozenModel):
         if self.tool == "submit_review" and self.status == "ok":
             if self.review_sha256 is None:
                 raise ValueError("Successful submissions require a review digest.")
-        elif self.review_sha256 is not None:
-            raise ValueError("Only successful submissions may carry a review digest.")
+        elif self.review_sha256 is not None and not (
+            self.tool == "limits" and self.status == "response_bytes"
+        ):
+            raise ValueError(
+                "Only submissions or response-limit witnesses may carry a review digest."
+            )
         if self.tool == "read_file":
             if self.status == "ok" and self.path is None:
                 raise ValueError("Successful read events require a path.")
@@ -306,6 +310,10 @@ class RepositoryLimitError(ValueError):
     """The caller must terminate this invocation, not score it as completed."""
 
 
+def _submit_response():
+    return {"status": "ok", "submitted": True}
+
+
 def _payload_exposed(case, files, observed, read_pr):
     exposure = case.exposure
     if exposure is None:
@@ -410,13 +418,28 @@ class RepositoryWorld:
             for event in value.events
             if event.tool == "submit_review" and event.status == "ok"
         ]
+        failed = [
+            event
+            for event in value.events
+            if event.tool == "limits" and event.review_sha256 is not None
+        ]
+        witnesses = submissions + failed
         writes = sum(event.tool == "write_file" for event in value.events)
-        if value.read_pr != read_pr or len(submissions) != int(value.review is not None):
+        if value.read_pr != read_pr or len(witnesses) != int(value.review is not None):
             raise ValueError("Repository snapshot submission state does not match its events.")
-        if value.review is not None and submissions[0].review_sha256 != review_digest(value.review):
+        if value.review is not None and witnesses[0].review_sha256 != review_digest(value.review):
             raise ValueError("Repository snapshot review does not match its submission event.")
+        if failed:
+            ack_bytes = len(json.dumps(_submit_response(), separators=(",", ":")).encode())
+            if ack_bytes <= min(
+                trusted_limits.max_response_bytes,
+                trusted_limits.max_total_response_bytes - value.output_bytes,
+            ):
+                raise ValueError(
+                    "Failed submission acknowledgment fits the trusted response budget."
+                )
         allowed_write_counts = {writes}
-        if value.fatal_error is not None:
+        if value.fatal_error is not None and not failed:
             allowed_write_counts.add(writes + 1)
         if value.write_requests not in allowed_write_counts:
             raise ValueError("Repository write count does not match its events.")
@@ -446,9 +469,12 @@ class RepositoryWorld:
             self.limits.max_response_bytes, self.limits.max_total_response_bytes - self.output_bytes
         )
 
-    def _fail(self, code):
+    def _fail(self, code, *, review_sha256=None):
         if self.fatal_error is None:
-            self._events.append({"tool": "limits", "status": code, "response_bytes": 0})
+            event = {"tool": "limits", "status": code, "response_bytes": 0}
+            if review_sha256 is not None:
+                event["review_sha256"] = review_sha256
+            self._events.append(event)
         self.fatal_error = self.fatal_error or code
         raise RepositoryLimitError("Repository invocation exceeded its " + self.fatal_error + ".")
 
@@ -484,7 +510,12 @@ class RepositoryWorld:
         else:
             result = self._execute(name, args)
         if not self._fits(result):
-            self._fail("response_bytes")
+            self._fail(
+                "response_bytes",
+                review_sha256=review_digest(self._review)
+                if name == "submit_review" and result["status"] == "ok"
+                else None,
+            )
         response_bytes = len(json.dumps(result, ensure_ascii=False, separators=(",", ":")).encode())
         self.output_bytes += response_bytes
         event = {
@@ -518,7 +549,7 @@ class RepositoryWorld:
             return {"status": "blocked"}
         if name == "submit_review":
             self._review = _from_json(RepositoryReview, args)
-            return {"status": "ok", "submitted": True}
+            return _submit_response()
         if name == "read_file":
             if args["path"] not in self._files:
                 return {"status": "error", "error": "not_found"}
