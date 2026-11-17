@@ -1,6 +1,9 @@
 # Symphony management and remaining milestones
 
-Status: active project delivery. The OPS10 setup milestone, CORE11, CLAUDE13
+Status: active project delivery. Verified repository snapshot correction52 is
+registered backlog/off; registration grants no dispatch or implementation.
+
+Status of existing milestones: The OPS10 setup milestone, CORE11, CLAUDE13
 and standalone workflow report contract28 are delivered. PR21 accepted the
 disjoint core/native custody contracts. Native50 has scoped acceptance; Native12
 now prepares the SDK231 Source packet, with broader runtime and delivery work
@@ -447,6 +450,38 @@ Null links are permitted only for future pending tasks.
         "Accepted core identity is public ab5818005baaff32d13bac061ed494b2aab0a8c3: workflow_cases.py22226B/b553efab000c8d9d035c94852cab62c99ce95e833406b29cec5e4c3ae8063362; workflow_world.py29740B/55b62ddeb99ac505504a2221ccc07ab3bba9261efeeb0ffd10270e197c50e96c; workflow_replay.py17645B/428673f29845743fc31483db0a68704e198d2b1b4d4c0fd07319f5424e05db0e. Recheck these relevant bytes and current managed base before implementing; changed APIs require reconciliation, not blind overlay.",
         "The versioned parent14 gains only this additive child while retaining11/12 and every original criterion. Actual issue14 remains11/12 blocked/off until Root applies the reviewed postmerge child binding; this preparation does not claim that external update occurred. Full fresh-process/conversation/private-workspace, transport-success, Native/SDK, error/unknown/accounting, installed and downstream acceptance remains open."
       ]
+    },
+    {
+      "id": "repository-failed-submit-snapshot",
+      "title": "Restore bounded failed-submit repository snapshots",
+      "issue": "https://github.com/utkutugrul/review-boundary/issues/52",
+      "owner": "Codex",
+      "reviewer": "Claude",
+      "status": "backlog",
+      "dependencies": [
+        "core-11",
+        "claude-13"
+      ],
+      "acceptance": [
+        "Own only src/review_boundary/repository_world.py, tests/test_repository_world.py, tests/test_repository_adversarial.py, tests/test_repository_runtime.py and the necessary short docs/repository-mode.md note. Preserve unchanged runtime/task/v2/workflow modules and compatibility goldens. Use a fresh dedicated managed issue workspace after registration delivery and explicit fresh Root promotion. Recheck actual closed11/13 and the unchanged host claim gate before Source changes. No provider/Native/corpus/CLI/auth/permission/coordinator work.",
+        "Reproduce the supported-input failure without assigning private counters or mutating a supplied snapshot. Preserve the retained attempted review and the meaningful existing unaffordable-submit assertion. A response-budget failure remains fatal and never becomes a completed or conclusive review.",
+        "Use existing fields and enum values only. Keep the single terminal limits/response_bytes event with zero returned bytes and bind the newly validated failed submission through its existing review_sha256. Create this witness only for the actual first validated submit whose fixed acknowledgment fails the trusted response budget. Generic limits, invalid arguments, call limits and already-submitted responses must not fabricate attempted-review evidence.",
+        "Restore only a coherent failed-review state: exact case/trusted limits, one matching final fatal event, no successful submission, strictly validated review with matching terminal witness digest, and an acknowledgment that truly exceeds the remaining trusted response budget. Reject missing/mismatched/extra digests, missing review, wrong limit/status/tool, nonterminal/duplicate witnesses, mixed successful/failed submission claims and budget-feasible forged failures. Preserve all existing source-observation, exposure, write-count, calls/events, byte-sum and limit checks.",
+        "Preserve schema_version1, the unchanged public field/enum vocabulary and all valid legacy v1 healthy/success/generic-fatal roundtrips and compatibility goldens. Version2 remains reserved for caseV2. Document the narrow event-semantic extension and reader compatibility. Historical invalid unbound-review snapshots remain refused and are never silently repaired. Do not weaken v2 replay or workflow producer/bridge completion checks.",
+        "The restored failed state preserves review diagnostics, events, calls, output bytes, fatal_error and the same scoring result as its supported live state. completed, conclusive and rubric_passed remain False. Never count an unreturned acknowledgment as output or create a successful submit event. A later fatal result after an earlier valid successful submission still binds only to that earlier success.",
+        "Keep fatal counters and unsupported post-fatal recovery behavior honest. Do not clamp counters, fabricate missing events, reset fatal state, retry a tool or erase write attempts to make a snapshot pass. Preserve the current post-fatal write-accounting assertion and the stop-on-limit contract.",
+        "Prove the pure restore_repository_world path used by the existing native adapter can save and restore the newly representable failed state without a model, SDK campaign or external effect. Preserve v1/v2 case dispatch and unchanged workflow copy-before-commit behavior. All retained partial reviews remain partial until actual complete changed-source review covers the necessary scope."
+      ],
+      "validation": [
+        "On the literal supported3.11.15/3.14.3 runtimes, add meaningful pure positive and adversarial negative controls for the supported failure roundtrip, exact attempted-review digest, remaining-budget boundary, absent/wrong/duplicate/nonterminal witnesses, wrong case/limits, mixed submission state, unchanged successful/generic-fatal roundtrips and incomplete scoring. Use real canonical JSON byte accounting, with at-cap and one-over behavior determined from the actual fixed acknowledgment. Do not modify the original evidence or delete an existing assertion to obtain a pass.",
+        "Run relevant world, adversarial, runtime and unchanged v1-compatibility/v2/workflow checks. Keep default case/schema/snapshot/scoring goldens and their original assertions; no blind rebaseline. Preserve the actual historical pure counter as fail-before evidence, then bind changed-source outcomes and installed module identity separately. Check lint/format and current CI as appropriate. Do not run blocked Native12 operations or paid/provider evaluations as a shortcut to this pure correction.",
+        "Freeze final source and use the genuine installed Claude bridge with necessary complete source/tests/docs and compatibility context. Preserve findings, partial coverage, exact keys and cleanup. A partial review, test count or existing completed review of unchanged code cannot approve the changed restoration boundary. No identical-input retry or forced-complete verdict."
+      ],
+      "evidence": [
+        "Actual assigned issue52 is backlog/off with Codex/Claude roles, six headings and closed11/13 dependencies. Registration creates no dispatch authority.",
+        "Pure supported-input counter reproduced on each literal3.11.15/3.14.3: six38B replies leave28/256B before an unaffordable32B submission. Retained review cannot restore; completion/scoring remainfalse. Workflow copy/replay/completion protects the bridge. Historical proofs and partial reviews remain unchanged.",
+        "All sixteen previous task contracts and manual10 remain unchanged. Full project acceptance stays open; package version consistency is separate maintenance."
+      ]
     }
   ]
 }
@@ -488,76 +523,12 @@ not establish a live claim, model result or native execution authority.
 
 ## Controlled core handoff
 
-The proposal below is historical accepted custody evidence. PR21 landed it;
-PR22 subsequently delivered the core. Its old pre-landing descriptions do not
-reopen completed work or grant another dispatch.
-
-Landing this registry change requires explicit owner acceptance of this custody
-handoff. Before landing, main still protects #11. Accepted landing releases this
-completed manual claim and the separate native claim described below; it does not
-promote or dispatch either task. Hold10 remains. Both11 and12 require the actual
-closed13 dependency and their own matching live claim.
-
-The old owner stays stopped and its dirty worktree is preserved. Verified input
-is staged read-only at `.runtime-cache/core-handoff/` in the dedicated GH-11
-workspace. Before adoption, compare every file's actual length and SHA-256 with
-this committed table, not merely a manifest supplied beside the input. Reject
-missing, extra, mismatched or unknown input. Apply only the listed ten files and
-the separately listed documentation proposal after a genuine live claim passes.
-The managed task then performs integration checks against current main.
-
-| Input | Bytes | Expected SHA-256 |
-| --- | ---: | --- |
-| `README.md` | 5094 | `5147d736bdd5f65fa4465272f74764fa4e11a0bb75e6ea1f6a259e2ce0151cc7` |
-| `docs/agent-workflows.md` | 5387 | `f3541b5d10d6abc695ad998039421f8a37f97675a5a6379c5874ddc207e0ca30` |
-| `src/review_boundary/provenance.py` | 10163 | `991e9aa5eb2845d48fe39c3847df8c85df394be9f0094a31e8fb075ef79411b5` |
-| `src/review_boundary/workflow_cases.py` | 22226 | `b553efab000c8d9d035c94852cab62c99ce95e833406b29cec5e4c3ae8063362` |
-| `src/review_boundary/workflow_replay.py` | 17645 | `428673f29845743fc31483db0a68704e198d2b1b4d4c0fd07319f5424e05db0e` |
-| `src/review_boundary/workflow_world.py` | 29740 | `55b62ddeb99ac505504a2221ccc07ab3bba9261efeeb0ffd10270e197c50e96c` |
-| `tests/test_provenance.py` | 8677 | `7f40a974f6f67d65336aeb19006e15786bd0e51cfcebc79b67de40c048aee2c1` |
-| `tests/test_workflow_cases.py` | 14479 | `e6fd7fa120e3cf0b31010f49511bdaf5af9454735afc2188dbbf37a65f3b4e3b` |
-| `tests/test_workflow_replay.py` | 34476 | `80d0e1b5cb8db5927588f779c6a6c3dea6b5b4c41106b3ef5f2fb809b017fa50` |
-| `tests/test_workflow_world.py` | 28188 | `7cb8f8c812d5e9402885ea7f92c834246f92cf56263c04e23c14b28981df6e38` |
-| `docs-only-proposal.patch` | 3319 | `148f5291333e771d030f090c0a9b4ff31c92a79ee76ed370c323d9a5826a2f88` |
-
-The table binds source identity, not historical execution authenticity. The
-operator's preserved receipts remain the evidence for earlier checks. No native
-execution, dependency closure, reviewer approval or automatic promotion follows
-from these hashes. The operator requires #13 closed, the accepted registry and
-matching actual #11 roles/dependencies before adding dispatch:enabled.
+The historical proposal accepted by PR21 is preserved in the
+[custody archive](../history/symphony-custody-handoffs.md#controlled-core-handoff),
+including its exact input table and limitations. It grants no current dispatch.
 
 ## Controlled native handoff
 
-This section preserves the historical proposal accepted by PR21. Manual12 was
-released and the initial GH12 worker entered a Source-only phase at that time.
-That worker has retired; the current registry and actual GitHub state govern any
-future promotion. The pre-landing descriptions below grant no new dispatch or
-runtime authority.
-
-The native file contract is [native-custody-inputs.json](native-custody-inputs.json),
-SHA-256 `c1d325b2836bd611719dff4adb50b1e51400d3ef146d6b729805441e683c8d00`. The operator must verify that committed identity, then
-compare every staged input's path, byte length and hash against its `files` list.
-Reject missing, extra, mismatched, symlinked or unknown inputs. The staged receipt
-belongs outside `.runtime-cache/native-handoff/`; it is not its own authority.
-
-Exactly 56 native files are eligible for managed adoption. The six excluded
-workflow modules/tests remain CORE11-owned, including any newer accepted version.
-The excluded README description is already delivered; preserve current main and
-core documentation. Excluded files stay preserved in the old worktree and must
-never be overlaid from this native intake. This prevents ownership collisions;
-it does not drop core features from the full project goal.
-
-Before accepted landing, main still holds manual12. After landing and an actual
-closed13 dependency, only explicit operator promotion plus a matching fresh
-GH-12 live claim may start the managed source integration/correction task. Its
-first phase may adopt the verified product sources and author corrected Source.
-The old hard-bound private operator remains separate, unretargeted and UNRUN.
-No old receipt, source hash, task label or custody release grants execution.
-
-Complete independent review must cover the corrected profiles and their actual
-workspace/interpreter/dependency inputs before the operator issues a concrete
-bounded runtime decision. Preserve partial/unavailable outcomes and actual
-ownership on uncertainty. Existing ordinary coding-account Source review remains
-authorized. No application-provider benchmark request, paid reservation, broad
-collection, host/VM activation or other lane's file edit follows from this handoff.
-The remaining native/SDK/host/VM acceptance and downstream issues remain open.
+The accepted historical native custody terms and unchanged manifest reference are
+preserved in the [custody archive](../history/symphony-custody-handoffs.md#controlled-native-handoff).
+Current registry, actual GitHub state and fresh Root admission govern new work.
