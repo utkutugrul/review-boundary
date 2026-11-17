@@ -188,6 +188,7 @@ def authenticated_identity(
 # recoverable until operator reconciliation; never infer retirement from an attempt.
 _UNRETIRED_CONSTRUCTORS: list[IntakeStore] = []
 _UNRETIRED_CLOSES: list[IntakeStore] = []
+_UNRETIRED_STARTUPS: list[IntakeStore] = []
 
 
 def _cleanup_outcome(primary: BaseException | None, error: BaseException) -> BaseException:
@@ -519,6 +520,15 @@ class IntakeStore:
                     outcome = _cleanup_outcome(outcome if outcome is not None else primary, error)
             # Failed close retains the SQLite handle and cooperative lock. An
             # explicit later close may release custody, never retry an intake.
+            if (
+                any(s is self for s in _UNRETIRED_STARTUPS)
+                and self._database_closed
+                and all(
+                    self._descriptor_retirement[name] == "confirmed" and getattr(self, name) is None
+                    for name in ("_lock_fd", "_dir_fd")
+                )
+            ):
+                _UNRETIRED_STARTUPS[:] = [s for s in _UNRETIRED_STARTUPS if s is not self]
         if outcome is not None:
             if (
                 context is not None
@@ -720,6 +730,17 @@ class IntakeServer:
             self.store.close()
 
 
+async def _close_failed_start(owner: IntakeServer) -> None:
+    try:
+        await owner.close()
+    finally:
+        # No caller receives this owner. Retain the actual store, not saved
+        # descriptor numbers, until an explicit close confirms its resources.
+        store = owner.store
+        if not store._database_closed and not any(s is store for s in _UNRETIRED_STARTUPS):
+            _UNRETIRED_STARTUPS.append(store)
+
+
 async def start_server(
     *, policy: IntakePolicy, secret_file: Path, intake_directory: Path, port: int = 0
 ) -> IntakeServer:
@@ -738,10 +759,13 @@ async def start_server(
         )
         return owner
     except OSError:
-        await owner.close()
-        raise IntakeError("configuration_refused") from None
+        try:
+            raise IntakeError("configuration_refused") from None
+        except IntakeError:
+            await _close_failed_start(owner)
+            raise
     except BaseException:
-        await owner.close()
+        await _close_failed_start(owner)
         raise
 
 

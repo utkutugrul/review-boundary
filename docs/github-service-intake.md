@@ -152,6 +152,21 @@ remains. The collection records unresolved process resources for operator
 reconciliation and grants no restart, adoption or execution authority. A confirmed
 constructor cleanup closes the database before releasing those descriptors and
 still leaves the conservative active fence.
+If binding fails, startup selects fixed `configuration_refused` as the active
+primary before closing the server owner. Its suppressed context retains the raw
+bind failure internally. Ordinary cleanup failure preserves that selected object;
+cleanup cancellation follows the existing close priority and chain rules below.
+Failed startup cannot return its owner. When database closure is unconfirmed,
+the private `_UNRETIRED_STARTUPS` collection retains the exact actual `IntakeStore`
+once by identity, with its SQLite connection and original descriptors. Successful
+starts and ordinary caller-owned stores never acquire this registration. A later
+explicit public close on that store removes startup custody only after confirmed
+database closure and confirmed closure of both descriptors with both fields
+`None`. Unknown descriptor retirement retains custody and never retries a saved
+number. Confirmed resource closure can retire startup custody while the poisoned
+marker and active session still require operator reconciliation. This neither
+certifies a clean session nor repairs SQL or markers, retries cleanup
+automatically, reopens intake or establishes external worker retirement.
 Normal close records confirmed database closure separately from logical intake
 closure. Each lock/directory close is attempted independently. A returned close
 confirms that component; an exception leaves its retirement unknown, even when
@@ -206,6 +221,14 @@ contention, marker failure, unclean restart and physical socket/protocol closure
 Execution transitions and SQL population in tests are synthetic owned fixtures,
 never receiver call paths. Static callable-path checks supplement actual runtime
 observations; test counts are not evidence of model robustness or power-loss tests.
+Startup controls additionally use an actual owned occupied IPv4 loopback listener
+to obtain a real bind refusal, with clean cleanup and controlled preoriginal
+SQLite-close failures. They check fixed exception identity, cancellation chains,
+queryable unresolved SQLite, actual-store custody and explicit confirmed cleanup.
+Descriptor result loss keeps truthful uncertainty after controlled physical close.
+These controls deliver no OS signal. The existing real-signal test remains
+historical unless separately authorized; a selected nonsignal run must report
+its exact IDs and count rather than claim a full intake-suite rerun.
 
 ```sh
 PYTHONPATH=src PYTHONDONTWRITEBYTECODE=1 \

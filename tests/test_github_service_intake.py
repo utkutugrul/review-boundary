@@ -4,13 +4,16 @@ import argparse
 import ast
 import asyncio
 import contextlib
+import errno
 import hashlib
 import hmac
 import io
 import json
 import os
 import signal
+import socket
 import sqlite3
+import sys
 import tempfile
 import time
 import unittest
@@ -854,6 +857,314 @@ class StorageTests(Scratch):
         )
         self.assertTrue((self.directory / intake.SESSION).is_file())
         self.error("reconciliation_required", intake.IntakeStore, self.directory)
+
+
+class StartupTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="intake-startup-")
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name).resolve()
+        self.secret_file = self.root / "secret"
+        write_secret_fixture(self.secret_file)
+        self.listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.addCleanup(self.listener.close)
+        self.listener.bind(("127.0.0.1", 0))
+        self.listener.listen(1)
+        self.port = self.listener.getsockname()[1]
+        self.sequence = 0
+
+    async def failed_start(self, cleanup=None, primary=None):
+        self.sequence += 1
+        directory = self.root / f"intake-{self.sequence}"
+        owners, binds, active, databases = [], [], [], []
+        real_owner = intake.IntakeServer
+        real_bind = asyncio.get_running_loop().create_server
+        real_close = intake.JobStore.close
+
+        def owner(*args):
+            result = real_owner(*args)
+            owners.append(result)
+            return result
+
+        async def bind(*args, **kwargs):
+            if primary is not None:
+                raise primary
+            try:
+                return await real_bind(*args, **kwargs)
+            except OSError as error:
+                binds.append(error)
+                raise
+
+        def close(database):
+            active.append(sys.exception())
+            databases.append(database)
+            if cleanup is not None:
+                raise cleanup
+            real_close(database)
+
+        with (
+            patch.object(intake, "IntakeServer", side_effect=owner),
+            patch.object(asyncio.get_running_loop(), "create_server", side_effect=bind),
+            patch.object(intake.JobStore, "close", new=close),
+            self.assertRaises(BaseException) as caught,
+        ):
+            await intake.start_server(
+                policy=POLICY,
+                secret_file=self.secret_file,
+                intake_directory=directory,
+                port=self.port,
+            )
+        # Every hook is restored before actual-object cleanup. No saved fd retry.
+        self.assertEqual(len(owners), 1)
+        result = owners[0]
+        self.addCleanup(self.close_owned_store, result.store)
+        self.assertEqual(databases, [result.store._db])
+        self.assertTrue(result.closing)
+        self.assertTrue(result.stopped.done())
+        self.assertIsNone(result.server)
+        self.assertEqual(result.connections, set())
+        self.assertEqual(result.secret, b"")
+        self.assertEqual(self.listener.getsockname(), ("127.0.0.1", self.port))
+        self.listener.settimeout(1)
+        with socket.create_connection(("127.0.0.1", self.port), timeout=1):
+            accepted, _ = self.listener.accept()
+            accepted.close()
+            self.assertEqual(accepted.fileno(), -1)
+        if primary is None:
+            self.assertEqual(len(binds), 1)
+            self.assertIsInstance(binds[0], OSError)
+            self.assertEqual(binds[0].errno, errno.EADDRINUSE)
+            self.assertIs(type(active[0]), intake.IntakeError)
+            self.assertEqual(active[0].code, "configuration_refused")
+            self.assertEqual(str(active[0]), "configuration_refused")
+            self.assertIs(active[0].__context__, binds[0])
+            self.assertIsNone(active[0].__cause__)
+            self.assertTrue(active[0].__suppress_context__)
+        else:
+            self.assertEqual(binds, [])
+            self.assertIs(active[0], primary)
+        return result, caught.exception, active[0]
+
+    def close_owned_store(self, store):
+        # Descriptor-result-loss controls physically close both originals. An
+        # unknown record must never become another descriptor close attempt.
+        if not store._closed:
+            store.close()
+
+    def unresolved(self, store):
+        self.assertEqual(sum(s is store for s in intake._UNRETIRED_STARTUPS), 1)
+        self.assertNotIn(store, intake._UNRETIRED_CONSTRUCTORS)
+        self.assertNotIn(store, intake._UNRETIRED_CLOSES)
+        self.assertFalse(store._database_closed)
+        self.assertFalse(store._closed)
+        self.assertFalse(store._cleanup_unknown)
+        self.assertTrue(store.poisoned)
+        self.assertEqual(store._db._db.execute("SELECT 1").fetchone()[0], 1)
+        self.assertEqual(
+            store._descriptor_retirement, {"_lock_fd": "unattempted", "_dir_fd": "unattempted"}
+        )
+        for name, path in (("_lock_fd", intake.LOCK), ("_dir_fd", None)):
+            info = os.fstat(getattr(store, name))
+            expected = (store.directory / path if path else store.directory).stat()
+            self.assertEqual((info.st_dev, info.st_ino), (expected.st_dev, expected.st_ino))
+        self.assertEqual(
+            json.loads((store.directory / intake.MARKER).read_bytes())["state"], "unknown"
+        )
+        self.assertEqual((store.directory / intake.SESSION).read_text(), store._session)
+
+    def confirmed(self, store, *, clean):
+        self.assertTrue(store._database_closed)
+        self.assertTrue(store._closed)
+        self.assertFalse(store._cleanup_unknown)
+        self.assertEqual(
+            store._descriptor_retirement, {"_lock_fd": "confirmed", "_dir_fd": "confirmed"}
+        )
+        self.assertIsNone(store._lock_fd)
+        self.assertIsNone(store._dir_fd)
+        self.assertNotIn(store, intake._UNRETIRED_STARTUPS)
+        with self.assertRaises(sqlite3.ProgrammingError):
+            store._db._db.execute("SELECT 1")
+        self.assertEqual(
+            json.loads((store.directory / intake.MARKER).read_bytes())["state"],
+            "clean" if clean else "unknown",
+        )
+        self.assertEqual((store.directory / intake.SESSION).exists(), not clean)
+
+    async def test_real_bind_refusal_with_confirmed_cleanup(self):
+        owner, selected, active = await self.failed_start()
+        self.assertIs(selected, active)
+        self.confirmed(owner.store, clean=True)
+        # Actual listener retirement uses its original object.
+        self.listener.close()
+        self.assertEqual(self.listener.fileno(), -1)
+        reopened = intake.IntakeStore(owner.store.directory)
+        self.assertNotIn(reopened, intake._UNRETIRED_STARTUPS)
+        reopened.close()
+
+    async def test_real_bind_refusal_retains_actual_store_until_explicit_close(self):
+        cleanup = OSError("controlled failure before original close")
+        owner, selected, active = await self.failed_start(cleanup)
+        self.assertIs(selected, active)
+        self.unresolved(owner.store)
+        attempts = []
+
+        def fail(database):
+            attempts.append(database)
+            raise cleanup
+
+        with (
+            patch.object(intake.JobStore, "close", new=fail),
+            self.assertRaises(intake.IntakeError) as caught,
+        ):
+            await intake._close_failed_start(owner)
+        self.assertEqual(caught.exception.code, "outcome_unknown")
+        self.assertEqual(attempts, [owner.store._db])
+        self.unresolved(owner.store)
+        owner.store.close()
+        self.confirmed(owner.store, clean=False)
+        with self.assertRaises(intake.IntakeError) as caught:
+            intake.IntakeStore(owner.store.directory)
+        self.assertEqual(caught.exception.code, "reconciliation_required")
+
+    async def test_failed_bind_cleanup_cancellation_preserves_selected_chain(self):
+        for kind in ("unchained", "cause", "suppressed"):
+            with self.subTest(kind=kind):
+                cancellation = asyncio.CancelledError()
+                explicit = ValueError("controlled explicit cause")
+                if kind == "cause":
+                    cancellation.__cause__ = explicit
+                elif kind == "suppressed":
+                    cancellation.__suppress_context__ = True
+                owner, selected, active = await self.failed_start(cancellation)
+                self.assertIs(selected, cancellation)
+                if kind == "unchained":
+                    self.assertIs(selected.__cause__, active)
+                    self.assertTrue(selected.__suppress_context__)
+                else:
+                    self.assertIs(selected.__cause__, explicit if kind == "cause" else None)
+                    self.assertTrue(selected.__suppress_context__)
+                    self.assertIs(selected.__context__, active)
+                self.unresolved(owner.store)
+                owner.store.close()
+                self.confirmed(owner.store, clean=False)
+
+    async def test_shared_failed_start_cleanup_keeps_prior_cancellation_and_chain(self):
+        for kind in ("unchained", "cause", "suppressed"):
+            for cleanup in (None, OSError("controlled close failure"), KeyboardInterrupt()):
+                with self.subTest(kind=kind, cleanup=type(cleanup).__name__):
+                    primary = asyncio.CancelledError()
+                    explicit = ValueError("controlled prior cause")
+                    primary.__cause__ = explicit if kind == "cause" else None
+                    primary.__suppress_context__ = kind != "unchained"
+                    cause, suppression = primary.__cause__, primary.__suppress_context__
+                    owner, selected, active = await self.failed_start(cleanup, primary)
+                    self.assertIs(selected, primary)
+                    self.assertIs(active, primary)
+                    self.assertIs(selected.__cause__, cause)
+                    self.assertEqual(selected.__suppress_context__, suppression)
+                    if cleanup is None:
+                        self.confirmed(owner.store, clean=True)
+                    else:
+                        self.unresolved(owner.store)
+                        owner.store.close()
+                        self.confirmed(owner.store, clean=False)
+
+    async def test_shared_failed_start_ordinary_primary_keeps_cleanup_priority(self):
+        for cleanup_kind in (None, OSError, asyncio.CancelledError):
+            with self.subTest(cleanup=cleanup_kind):
+                primary = RuntimeError("controlled non-bind startup failure")
+                explicit = ValueError("controlled explicit startup cause")
+                primary.__cause__ = explicit
+                cleanup = cleanup_kind() if cleanup_kind else None
+                owner, selected, active = await self.failed_start(cleanup, primary)
+                self.assertIs(active, primary)
+                self.assertIs(primary.__cause__, explicit)
+                self.assertTrue(primary.__suppress_context__)
+                if cleanup_kind is asyncio.CancelledError:
+                    self.assertIs(selected, cleanup)
+                    self.assertIs(selected.__cause__, primary)
+                else:
+                    self.assertIs(selected, primary)
+                if cleanup is None:
+                    self.confirmed(owner.store, clean=True)
+                else:
+                    self.unresolved(owner.store)
+                    owner.store.close()
+                    self.confirmed(owner.store, clean=False)
+
+    async def test_explicit_startup_close_keeps_unknown_descriptor_custody(self):
+        owner, selected, active = await self.failed_start(OSError("preoriginal close"))
+        self.assertIs(selected, active)
+        self.unresolved(owner.store)
+        store = owner.store
+        target = store._lock_fd
+        directory_fd = store._dir_fd
+        real_close = os.close
+        attempts = []
+
+        def close(fd):
+            attempts.append(fd)
+            real_close(fd)
+            if fd == target:
+                raise OSError("controlled result loss after actual close")
+
+        # The kernel close happens once. Production must retain uncertainty and
+        # must never operate on the saved number again, even in explicit close.
+        with (
+            patch.object(intake.os, "close", side_effect=close),
+            self.assertRaises(intake.IntakeError) as caught,
+        ):
+            store.close()
+        self.assertEqual(caught.exception.code, "outcome_unknown")
+        self.assertEqual(attempts, [target, directory_fd])
+        self.assertTrue(store._database_closed)
+        self.assertTrue(store._closed)
+        self.assertTrue(store._cleanup_unknown)
+        self.assertEqual(store._descriptor_retirement["_lock_fd"], "unknown")
+        self.assertEqual(store._descriptor_retirement["_dir_fd"], "confirmed")
+        self.assertEqual(store._lock_fd, target)
+        self.assertIsNone(store._dir_fd)
+        self.assertEqual(sum(s is store for s in intake._UNRETIRED_STARTUPS), 1)
+        self.assertIn(store, intake._UNRETIRED_CLOSES)
+        with self.assertRaises(sqlite3.ProgrammingError):
+            store._db._db.execute("SELECT 1")
+        with patch.object(intake.os, "close") as retry:
+            with self.assertRaises(intake.IntakeError) as caught:
+                store.close()
+            self.assertEqual(caught.exception.code, "outcome_unknown")
+            retry.assert_not_called()
+        self.assertEqual(
+            json.loads((store.directory / intake.MARKER).read_bytes())["state"], "unknown"
+        )
+        self.assertTrue((store.directory / intake.SESSION).is_file())
+        # Both real closes returned in our hook before synthetic result loss.
+        # Retire test custody only; do not fabricate confirmed production fields.
+        intake._UNRETIRED_STARTUPS.remove(store)
+        intake._UNRETIRED_CLOSES.remove(store)
+
+    async def test_success_and_ordinary_caller_never_register_startup_custody(self):
+        directory = self.root / "ordinary"
+        store = intake.IntakeStore(directory)
+        self.addCleanup(store.close)
+        with (
+            patch.object(store._db, "close", side_effect=OSError("preoriginal close")),
+            self.assertRaises(intake.IntakeError),
+        ):
+            store.close()
+        self.assertNotIn(store, intake._UNRETIRED_STARTUPS)
+        store.close()
+        server = await intake.start_server(
+            policy=POLICY,
+            secret_file=self.secret_file,
+            intake_directory=self.root / "successful",
+        )
+        self.addAsyncCleanup(server.close)
+        self.assertNotIn(server.store, intake._UNRETIRED_STARTUPS)
+        self.assertTrue(server.server.is_serving())
+        await server.close()
+        self.assertFalse(server.server.is_serving())
+        self.assertEqual(server.server.sockets, ())
+        self.assertNotIn(server.store, intake._UNRETIRED_STARTUPS)
 
 
 class LoopbackTests(unittest.IsolatedAsyncioTestCase):
