@@ -1186,6 +1186,7 @@ def test_service_intake_claim_requires_only_the_registered_closed_store_dependen
         for number in (13, 36)
     ]
     tasks = registered_tasks()
+    next(task for task in tasks if task["id"] == "github-service-intake")["status"] = "ready"
     assert (
         management.check_live_claim(
             value, tasks=tasks, expected_issue=46, manual_claims=[10], now=NOW
@@ -1221,6 +1222,7 @@ def test_workflow_bridge_claim_requires_closed_core_without_native_dependency():
         for number in (11, 13)
     ]
     tasks = registered_tasks()
+    next(task for task in tasks if task["id"] == "workflow-bridge-io")["status"] = "ready"
     assert (
         management.check_live_claim(
             value, tasks=tasks, expected_issue=48, manual_claims=[10], now=NOW
