@@ -51,6 +51,23 @@ uv run --frozen review-boundary repository-demo --output runs/repository-demo
 
 Open `runs/repository-demo/report.html`. [Repository mode guide](docs/repository-mode.md).
 
+## Run a real reviewer
+
+Set `OPENROUTER_API_KEY` in your local environment, then preview a small run:
+
+```sh
+uv run --frozen review-boundary repository-run-model \
+  --provider openrouter --model openai/gpt-6-luna \
+  --epochs 1 --budget 20 --ledger runs/budget.json \
+  --output runs/my-reviewer --dry-run
+```
+
+Remove `--dry-run` to make paid API calls. Open `runs/my-reviewer/report.html`
+when it finishes, or load its `report.json` into the dashboard. Keep the same
+ledger across runs to retain spending and unsettled reservations. For direct
+OpenAI, Anthropic, other models or your own agent, see the
+[provider guide](docs/providers.md) and [reviewer adapters](docs/adapters.md).
+
 ## Explore the dashboard
 
 ```sh

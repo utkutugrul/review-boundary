@@ -1,26 +1,24 @@
 # Symphony management and remaining milestones
 
-Status: active project delivery. Verified repository snapshot correction52 is
-registered backlog/off; registration grants no dispatch or implementation.
+Status: finite application delivery, scoped by the owner on 2026-11-20.
+Finish the existing usable application without new feature tasks or audit series.
+The acceptance flow is clean installation, evaluation, JSON/HTML reporting,
+dashboard and saved-run comparison, followed by one bounded real-model smoke.
+Only defects blocking that flow belong to this delivery.
 
-Status of existing milestones: The OPS10 setup milestone, CORE11, CLAUDE13
-and standalone workflow report contract28 are delivered. PR21 accepted the
-disjoint core/native custody contracts. Native50 has scoped acceptance; Native12
-now prepares the SDK231 Source packet, with broader runtime and delivery work
-still open. Standalone Dashboard32 is delivered; full REPORTS15, fresh-process
-execution and shared product integration retain their open scope and prerequisites.
-Corpus16 remains blocked after automatic research review refusals; its research
-is preserved and only PyJWT is admitted.
-These are the actual [repository issues](https://github.com/utkutugrul/review-boundary/issues).
+PR50 delivered durable workflow bridge files; PR51 delivered authenticated local
+GitHub intake. PR55 delivers failed-submit snapshot recovery after current CI.
+These scoped deliveries do not complete the full hosted service or Native/SDK
+research. Broader corpus growth, public leaderboards, hosted App expansion and
+Native/SDK/VM milestones are deferred, not declared complete. Existing contracts
+and historical failures remain preserved below; no new task is registered.
 
-The owner authorizes verified project PR delivery without more permission
-questions. Root retains concrete review, tests and exact-head merge checks.
-Claim10 remains reserved for Root operator custody after setup delivery;
-claims11 and12 were released by PR21. Completing the setup milestone does not
-complete the full goal or stop Root orchestration. Dispatch stays explicit and
-operator-controlled. Native Source review, scoped controls and full runtime
-acceptance remain distinct. Historical evidence grants no new execution.
-Null links are permitted only for future pending tasks.
+Root retains standing owner authorization to merge verified project PRs without
+another permission question. CI and concrete review remain required. No active
+worker is assumed from old records, and dispatch is explicit. The manual claim10
+continues to reserve Root delivery bookkeeping. Historical evidence grants no
+new execution or access. See the actual
+[repository issues](https://github.com/utkutugrul/review-boundary/issues).
 
 ```json task-contract
 {
@@ -49,7 +47,8 @@ Null links are permitted only for future pending tasks.
         "Management delivery is implemented in PR19, PR20 and PR21. Final relevant management checks passed155 cases per supported local Python runtime; actual final independent Claude review and exact-head CI passed.",
         "The owner accepted setup and subsequently gave standing authorization for project PR approvals/merges without further permission questions. Root still verifies concrete delivery and exact heads; no self-review or failing-check bypass.",
         "The setup map, pinned GitHub adapter, separate workspaces, concurrency two, role/dependency gates and explicit promotion lifecycle have actual managed dispatch and delivery evidence. PR21 includes supported-runtime 155-case controls and completed independent final-source review; PR27 reconciled delivered reviewer state. Setup acceptance is complete, while Root closes actual issue10 only after this reconciliation is delivered.",
-        "manual_claims retains10 as reserved Root operator custody, not unfinished setup or a claim that the full project is complete. Root continues orchestration and concrete Source/runtime/delivery decisions; corpus16 remains blocked/off and downstream milestones retain their dependencies."
+        "manual_claims retains10 as reserved Root operator custody, not unfinished setup or a claim that the full project is complete. Root continues orchestration and concrete Source/runtime/delivery decisions; corpus16 remains blocked/off and downstream milestones retain their dependencies.",
+        "Owner scope freeze on 2026-11-20: finish current evaluation/report/dashboard/compare application, deliver existing ready code, run one final bounded real-model smoke and stop. No new feature tasks, research or audit cascade. Preserve deferred milestones and all prior safety/accounting limits."
       ]
     },
     {
@@ -81,7 +80,7 @@ Null links are permitted only for future pending tasks.
       "issue": "https://github.com/utkutugrul/review-boundary/issues/12",
       "owner": "Codex",
       "reviewer": "Claude",
-      "status": "active",
+      "status": "backlog",
       "dependencies": [
         "claude-13"
       ],
@@ -100,7 +99,8 @@ Null links are permitted only for future pending tasks.
         "The historical child-program context reproduces all original 790743 JSON bytes from quoted Source without omitting any of 38 programs. Reconstruction is separate from semantic review and actual execution.",
         "PR21 delivered custody at main1a59b54. After reviewer follow-up PR26/main d555890ba56783a60fe3c901bba88af7c49a7bbf and actual issue13 closure, Root verified prior-worker retirement and explicitly promoted later same12 Source phases. Each future promotion still requires fresh actual state; transient worker identities are not versioned lease evidence.",
         "Native50 SCOPED acceptance is complete: 12 preserved unchanged parent controls retain product90bee/privatefd8 bindings, while 38 new real-child controls ran at product200a32f8291f502a4778cd4818919bc73d70ff3f/private9c858f224eaaa434a932bea2e5b1f4599e741753 on Python 3.11.15/3.14.3. The new cases comprise 34 expected refusals and 4 owned-thread positives, each with an independently verified receipt, consumed one-use decision and zero held owners. Earlier failures and original result identities remain preserved; unchanged parents were not rerun or relabeled.",
-        "The current managed phase prepares SDK231 Source only: 107 fixed workers plus 124 parent/driver cases, with current startup/import/effect/cache and receipt contracts for Root review. These are selected declarations, not SDK passes. Native50 is harness evidence, not model evidence or whole12 completion; broader SDK, provider, host/VM, CLI/UI, integration and delivery acceptance remains open."
+        "The current managed phase prepares SDK231 Source only: 107 fixed workers plus 124 parent/driver cases, with current startup/import/effect/cache and receipt contracts for Root review. These are selected declarations, not SDK passes. Native50 is harness evidence, not model evidence or whole12 completion; broader SDK, provider, host/VM, CLI/UI, integration and delivery acceptance remains open.",
+        "On 2026-11-20 the owner deferred broader Native/SDK/VM work while finishing the usable current application. This is deferred scope, not completed validation or dispatch authority."
       ]
     },
     {
@@ -387,7 +387,7 @@ Null links are permitted only for future pending tasks.
       "issue": "https://github.com/utkutugrul/review-boundary/issues/46",
       "owner": "Codex",
       "reviewer": "Claude",
-      "status": "backlog",
+      "status": "done",
       "dependencies": [
         "claude-13",
         "service-store-contract"
@@ -410,7 +410,8 @@ Null links are permitted only for future pending tasks.
       ],
       "evidence": [
         "Root created actual issue46 backlog/off with Codex implementation, Claude review and human assignee utkutugrul. Fresh readbacks confirm dependencies13/36 are closed. Accepted versioned registration and explicit Root promotion are still required; no implementation, workspace activation or dispatch follows from this record.",
-        "This is the authenticated intake portion of existing SERVICE17. Store36 execution references are immutable, so intake uses a separate database/namespace with all four references permanently None. Full17 retains dependencies12/15/36 and requires reviewed staged-provenance reconciliation before any worker consumes intents; registration does not complete service integration or deployment."
+        "This is the authenticated intake portion of existing SERVICE17. Store36 execution references are immutable, so intake uses a separate database/namespace with all four references permanently None. Full17 retains dependencies12/15/36 and requires reviewed staged-provenance reconciliation before any worker consumes intents; registration does not complete service integration or deployment.",
+        "Delivered in PR51, merged c1b1b4ab45a1ed2afeff2623d65750c0e8dfe94a after 12 successful checks and two conditional skips. Both Source and fresh-installed runtime selections passed on Python3.11.15/3.14.3. Completed independent production review and Root bounded Source acceptance retained broader partial test-review limits. Full hosted service and external activation remain outside this delivery."
       ]
     },
     {
@@ -419,7 +420,7 @@ Null links are permitted only for future pending tasks.
       "issue": "https://github.com/utkutugrul/review-boundary/issues/48",
       "owner": "Codex",
       "reviewer": "Claude",
-      "status": "backlog",
+      "status": "done",
       "dependencies": [
         "core-11",
         "claude-13"
@@ -448,7 +449,8 @@ Null links are permitted only for future pending tasks.
       "evidence": [
         "Root created actual issue48 backlog/off with Codex/Claude/utkutugrul and actual closed11/13. This registers only the durable data-file portion of existing PROCESS14, with no feature implementation, host receipt, promotion or dispatch.",
         "Accepted core identity is public ab5818005baaff32d13bac061ed494b2aab0a8c3: workflow_cases.py22226B/b553efab000c8d9d035c94852cab62c99ce95e833406b29cec5e4c3ae8063362; workflow_world.py29740B/55b62ddeb99ac505504a2221ccc07ab3bba9261efeeb0ffd10270e197c50e96c; workflow_replay.py17645B/428673f29845743fc31483db0a68704e198d2b1b4d4c0fd07319f5424e05db0e. Recheck these relevant bytes and current managed base before implementing; changed APIs require reconciliation, not blind overlay.",
-        "The versioned parent14 gains only this additive child while retaining11/12 and every original criterion. Actual issue14 remains11/12 blocked/off until Root applies the reviewed postmerge child binding; this preparation does not claim that external update occurred. Full fresh-process/conversation/private-workspace, transport-success, Native/SDK, error/unknown/accounting, installed and downstream acceptance remains open."
+        "The versioned parent14 gains only this additive child while retaining11/12 and every original criterion. Actual issue14 remains11/12 blocked/off until Root applies the reviewed postmerge child binding; this preparation does not claim that external update occurred. Full fresh-process/conversation/private-workspace, transport-success, Native/SDK, error/unknown/accounting, installed and downstream acceptance remains open.",
+        "Delivered in PR50, merged cd465b17b14cb9ecd596277d38ab44dc8c6b88e8. Exact integration-head CI passed. Complete independent production/test-unit reviews were accepted with their retained context limits. Durable file bridge delivery does not complete all separate-process/Native acceptance."
       ]
     },
     {
@@ -457,7 +459,7 @@ Null links are permitted only for future pending tasks.
       "issue": "https://github.com/utkutugrul/review-boundary/issues/52",
       "owner": "Codex",
       "reviewer": "Claude",
-      "status": "backlog",
+      "status": "done",
       "dependencies": [
         "core-11",
         "claude-13"
@@ -480,7 +482,8 @@ Null links are permitted only for future pending tasks.
       "evidence": [
         "Actual assigned issue52 is backlog/off with Codex/Claude roles, six headings and closed11/13 dependencies. Registration creates no dispatch authority.",
         "Pure supported-input counter reproduced on each literal3.11.15/3.14.3: six38B replies leave28/256B before an unaffordable32B submission. Retained review cannot restore; completion/scoring remainfalse. Workflow copy/replay/completion protects the bridge. Historical proofs and partial reviews remain unchanged.",
-        "All sixteen previous task contracts and manual10 remain unchanged. Full project acceptance stays open; package version consistency is separate maintenance."
+        "All sixteen previous task contracts and manual10 remain unchanged. Full project acceptance stays open; package version consistency is separate maintenance.",
+        "Delivery PR55 preserves the exact five reviewed fix files and PR51. Source497 controls, bridge33 controls and fresh installed smoke passed on each supported runtime. Completed independent I covers all five changed files; Root accepted workflow/IO composition after both real-API schema-valid forgery counters passed. A/B remain partial; C never ran. Exact integration-head CI remains the merge gate; preexisting V2/version/power-loss concerns are not claimed fixed."
       ]
     }
   ]
